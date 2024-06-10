@@ -15,7 +15,7 @@ from torch.nn import functional as F
 import torchvision
 import torchvision.transforms as transforms
 from torch.nn.parallel import DataParallel
-from typing import Any, Callable, Dict, Optional, Set, Tuple, Type, Union, List
+
 
 TRAIN_INPUT = '/home/yeoman/research/train'
 TEST_INPUT = '/home/yeoman/research/test'
@@ -33,15 +33,15 @@ def drop_path(x, drop_prob: float = 0., training: bool = False):
     # output = x.div(keep_prob) * random_tensor
     # return output
 
-class DropPath(nn.Module):
-    """Drop paths (Stochastic Depth) per sample  (when applied in main path of residual blocks).
-    """
-    def __init__(self, drop_prob=None):
-        super(DropPath, self).__init__()
-        self.drop_prob = drop_prob
+# class DropPath(nn.Module):
+#     """Drop paths (Stochastic Depth) per sample  (when applied in main path of residual blocks).
+#     """
+#     def __init__(self, drop_prob=None):
+#         super(DropPath, self).__init__()
+#         self.drop_prob = drop_prob
 
-    def forward(self, x):
-        return drop_path(x, self.drop_prob, self.training)
+#     def forward(self, x):
+#         return drop_path(x, self.drop_prob, self.training)
 
 
 class Attention(nn.Module):
@@ -107,18 +107,21 @@ class PatchEmbeddings(nn.Module):
         config, 
         img_size: int = 48, 
         patch_size:int = 16,
-        num_channels:int = 3): 
+        in_channels:int = 3) -> None: 
         super().__init__()
         self.img_size = config["image_size"] #(h,w)
-        self.patch_size = config["patch_size"] # 
-        self.num_channels = config["num_channels"]
-        self.hidden_size = config["hidden_size"]
+        self.patch_size = config["patch_size"] # 16
+        self.in_channels = config["num_channels"] # 1 or 3
+        self.hidden_size = config["hidden_size"] #usually 768
         
         self.num_patches = (self.img_size // self.patch_size) ** 2 # (h * w)/p^2
-        self.proj = nn.Conv2d(self.num_channels, self.hidden_size, kernel_size=self.patch_size, stride=self.patch_size) # (C, Hid, kernel size, stride)
+        self.proj = nn.Conv2d(in_channels= self.in_channels, 
+                              out_channels=self.hidden_size, 
+                              kernel_size=self.patch_size, 
+                              stride=self.patch_size) # (C, Hid, kernel size, stride)
 
     def forward(self, x):
-        B, C, H, W = x.shape
+        B, C, H, W = x.shape #not necessary but good for showing what's what
         x = self.proj(x).flatten(2).transpose(1, 2)
         return x
 
@@ -213,14 +216,17 @@ class Block(nn.Module):
             proj_drop=proj_drop,
             norm_layer=norm_layer,
         )
-        self.drop_path = DropPath(drop_path if drop_path > 0. else nn.Identity)
+        # self.drop_path = DropPath(drop_path if drop_path > 0. else nn.Identity)
         
     def forward(self, x, return_attention = False):
         y, attn = self.attn(self.norm1(x))
         if return_attention:
             return attn
-        x = x + self.drop_path(y)
-        x = x + self.drop_path(self.mlp(self.norm1(x)))
+        # x = x + self.drop_path(y)
+        # x = x + self.drop_path(self.mlp(self.norm1(x)))
+        x = x + y
+        x = x + self.mlp(self.norm1(x))
+        return x
 
 class ViT(nn.Module):
     """
@@ -241,6 +247,7 @@ class ViT(nn.Module):
         self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
         self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, embed_dim))
         self.pos_drop = nn.Dropout(p=drop_rate)
+        self.norm = norm_layer(embed_dim)
         # Create a linear layer to project the encoder's output to the number of classes
         # self.classifier = nn.Linear(self.hidden_size, self.num_classes)
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)] 
@@ -252,18 +259,6 @@ class ViT(nn.Module):
         # Initialize the weights
         self.apply(self._init_weights)
 
-    # def forward(self, x, output_attentions=False):
-    #     # Calculate the embedding output
-    #     embedding_output = self.embedding(x)
-    #     # Calculate the encoder's output
-    #     encoder_output, all_attentions = self.encoder(embedding_output, output_attentions=output_attentions)
-    #     # Calculate the logits, take the [CLS] token's output as features for classification
-    #     logits = self.classifier(encoder_output[:, 0, :])
-    #     # Return the logits and the attention probabilities (optional)
-    #     if not output_attentions:
-    #         return (logits, None)
-    #     else:
-    #         return (logits, all_attentions)
 
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
@@ -286,8 +281,6 @@ class ViT(nn.Module):
         dim = x.shape[-1]
         w0 = w // self.patch_embed.patch_size
         h0 = h // self.patch_embed.patch_size
-        # we add a small number to avoid floating point error in the interpolation
-        # see discussion at https://github.com/facebookresearch/dino/issues/8
         w0, h0 = w0 + 0.1, h0 + 0.1
         patch_pos_embed = nn.functional.interpolate(
             patch_pos_embed.reshape(1, int(math.sqrt(N)), int(math.sqrt(N)), dim).permute(0, 3, 1, 2),
@@ -344,6 +337,19 @@ class ViT(nn.Module):
 
 
 
+class LinearClassifier(nn.Module):
+    def __init__ (self, dim, num_labels = 7):
+        super(LinearClassifier, self).__init__()
+        self.num_labels = num_labels
+        self.linear = nn.Linear(dim, num_labels)
+        self.linear.weight.data.normal_(mean=0.0, std=0.01)
+        self.linear.bias.data.zero_()
+        
+    def forward(self, x):
+        x = x.view(x.size(0), -1)
+        return self.linear(x)
+
+
 
 def prepare_data(batch_size=4, num_workers=2, train_sample_size=None, test_sample_size=None):
     # Define additional transforms for performance improvement
@@ -369,10 +375,7 @@ def prepare_data(batch_size=4, num_workers=2, train_sample_size=None, test_sampl
         transforms.Resize((IMG_SIZE, IMG_SIZE), antialias=True),
         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
     ])
-    # Load the FER2013 dataset from the folders
-#     trainset1 = torchvision.datasets.ImageFolder(root='/kaggle/input/fer2013/train', transform=train_transform)
-#     trainset2 = torchvision.datasets.ImageFolder(root='/kaggle/input/ck48-5-emotions/CK+48', transform=train_transform)
-#     trainset = torch.utils.data.ConcatDataset([trainset1,trainset2])
+
     trainset = torchvision.datasets.ImageFolder(root=TRAIN_INPUT, transform=train_transform)
     testset = torchvision.datasets.ImageFolder(root=TEST_INPUT, transform=test_transform)
 
@@ -447,18 +450,6 @@ def load_experiment(experiment_name, checkpoint_name="model_final.pt", base_dir=
 
 
 def visualize_images():
-#     trainset1 = torchvision.datasets.ImageFolder(root='/kaggle/input/fer2013/train', transform=transforms.Compose([
-#             transforms.Resize((IMG_SIZE, IMG_SIZE), antialias=True),
-#             transforms.ToTensor(),
-#             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
-#         ])) 
-#     trainset2 = torchvision.datasets.ImageFolder(root='/kaggle/input/ck48-5-emotions/CK+48', transform=transforms.Compose([
-#             transforms.Resize((IMG_SIZE, IMG_SIZE), antialias=True),
-#             transforms.ToTensor(),
-#             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
-#         ]))
-
-#     trainset = torch.utils.data.ConcatDataset([trainset1, trainset2])
     trainset = torchvision.datasets.ImageFolder(root=TRAIN_INPUT, transform=transforms.Compose([
             transforms.Resize((IMG_SIZE, IMG_SIZE), antialias=True),
             transforms.ToTensor(),
@@ -506,7 +497,8 @@ def visualize_attention(model, output=None, device="cuda"):
     images = images.to(device)
     model = model.to(device)
     # Get the attention maps from the last block
-    logits, attention_maps = model(images, output_attentions=True)
+    logits = model(images) 
+    attention_maps = model().get_last_attnetion
     # Get the predictions
     predictions = torch.argmax(logits, dim=1)
     # Concatenate the attention maps from all blocks
@@ -566,7 +558,7 @@ config = {
     "patch_size": 16,  # Input image size: 48x48 -> 8x8 patches
     "hidden_size": 768,
     "num_hidden_layers": 12,
-    "num_attention_heads": 6,
+    "num_attention_heads": 12,
     "intermediate_size": 4 * 768, # 4 * hidden_size
     "hidden_dropout_prob": 0.5,
     "attention_probs_dropout_prob": 0.5,
@@ -583,6 +575,8 @@ assert config['intermediate_size'] == 4 * config['hidden_size']
 assert config['image_size'] % config['patch_size'] == 0
 
 
+
+
 class Trainer:
     """
     The simple trainer.
@@ -594,10 +588,7 @@ class Trainer:
         self.loss_fn = loss_fn
         self.exp_name = exp_name
         self.device = device
-        if torch.cuda.device_count() > 1:
-            self.model = DataParallel(model)
-        else:
-            self.model = model
+        self.model = model
 
     def train(self, trainloader, testloader, epochs, save_model_every_n_epochs=0):
         """
@@ -652,7 +643,7 @@ class Trainer:
                 images, labels = batch
 
                 # Get predictions
-                logits, _ = self.model(images)
+                logits  = self.model(images)
 
                 # Calculate the loss
                 loss = self.loss_fn(logits, labels)
@@ -672,10 +663,18 @@ def main():
     # Load the FER2013 dataset
     trainloader, testloader, _ = prepare_data(batch_size=batch_size)
     # Create the model, optimizer, loss function and trainer
-    model = ViT(config)
+    model = ViT(config,
+                img_size = IMG_SIZE,
+                patch_size= 16,
+                in_chans= 1,
+                num_classes= 7,
+                embed_dim=768)
     optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-2)
 #     optimizer = optim.SGD(model.parameters(), lr = lr, weight_decay = 1e-2, momentum = 0.9)
+    # linear_classifier = LinearClassifier()
+    # linear_classifier.train()
     loss_fn = nn.CrossEntropyLoss()
+    
     trainer = Trainer(model, optimizer, loss_fn, exp_name, device=device)
     trainer.train(trainloader, testloader, epochs, save_model_every_n_epochs=save_model_every_n_epochs)
 
