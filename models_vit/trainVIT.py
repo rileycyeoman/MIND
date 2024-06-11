@@ -1,245 +1,353 @@
-import os
-import argparse
-import json
-from pathlib import Path
-
+import math
 import torch
 from torch import nn
-import torch.distributed as dist
-import torch.backends.cudnn as cudnn
-from torchvision import datasets
-from torchvision import transforms as pth_transforms
-from torchvision import models as torchvision_models
-import utils
-import ViTransformer as vit
+import torchvision
+import pandas as pd
+import numpy as np
+import json, os, math
+import matplotlib.pyplot as plt
+import numpy as np
+from torch.utils.data import DataLoader
+from torch.nn import functional as F
+import torchvision.transforms as transforms
+import configparser
+from ViTransformer import ViT
 
+configs = configparser.ConfigParser()
+configs.read('config.ini')
+config = {
+    TRAIN_INPUT = configs["DATA"]['TRAIN_INPUT'],
+    TEST_INPUT = configs["DATA"]['TEST_INPUT'],
+    patch_size = configs.getint["PARAMETERS", "patch_size"],
+    hidden_size = configs.getint["PARAMETERS", "hidden_size"],
+    num_hidden_layers = configs.getint["PARAMETERS", "num_hidden_layers"],
+    num_attention_heads = configs.getint["PARAMETERS", "num_attention_heads"],
+    intermediate_size = configs.getint["PARAMETERS", "intermediate_size"],
+    hidden_dropout_prob = configs.getfloat["PARAMETERS", "hidden_dropout_prob"],
+    attention_probs_dropout_prob = configs.getfloat["PARAMETERS", "attention_probs_dropout_prob"],
+    initializer_range = configs.getfloat["PARAMETERS", "initializer_range"],
+    image_size = configs.getint["PARAMETERS", "image_size"],
+    num_classes = configs.getint["PARAMETERS", "num_classes"],
+    num_channels = configs.getint["PARAMETERS", "num_channels"],
+    qkv_bias = configs.getboolean["PARAMETERS", "qkv_bias"],
+    use_faster_attention = configs.getboolean["PARAMETERS", "use_faster_attention"]
+}
 
-def eval_linear(args):
-    # ============ building network ... ============
-    model = vit.__dict__[args.arch](patch_size=args.patch_size, num_classes=7)
-    embed_dim = model.embed_dim * (args.n_last_blocks + int(args.avgpool_patchtokens))
-    model.cuda()
-    model.eval()
-    # load weights to evaluate
-    print(f"Model {args.arch} built.")
+IMG_SIZE = config["PARAMETERS"]["image_size"]
+TRAIN_INPUT = config["DATA"]['TRAIN_INPUT']
+TEST_INPUT = config["DATA"]['TEST_INPUT']
+def prepare_data(batch_size=4, num_workers=2, train_sample_size=None, test_sample_size=None):
+    # Define additional transforms for performance improvement
+    additional_transforms = [
+        transforms.RandomRotation(10),
+        transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.1),
+        transforms.RandomErasing(p=0.9, scale=(0.02, 0.2)),
+    ]
 
-    linear_classifier = LinearClassifier(embed_dim, num_labels=args.num_labels)
-    linear_classifier = linear_classifier.cuda()
-
-    # ============ preparing data ... ============
-    val_transform = pth_transforms.Compose([
-        pth_transforms.Resize(256, interpolation=3),
-        pth_transforms.CenterCrop(224),
-        pth_transforms.ToTensor(),
-        pth_transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
+    # Update the train_transform with additional transforms
+    train_transform = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Resize((IMG_SIZE, IMG_SIZE), antialias=True),
+        transforms.RandomApply(additional_transforms, p=0.5),
+        transforms.RandomHorizontalFlip(p=0.5),
+        transforms.RandomResizedCrop((IMG_SIZE, IMG_SIZE), scale=(0.8, 1.0), ratio=(0.75, 1.3333333333333333), interpolation=2, antialias=True),
+        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
     ])
-    dataset_val = datasets.ImageFolder(os.path.join(args.data_path, "val"), transform=val_transform)
-    val_loader = torch.utils.data.DataLoader(
-        dataset_val,
-        batch_size=args.batch_size_per_gpu,
-        num_workers=args.num_workers,
-        pin_memory=True,
-    )
 
-    if args.evaluate:
-        utils.load_pretrained_linear_weights(linear_classifier, args.arch, args.patch_size)
-        test_stats = validate_network(val_loader, model, linear_classifier, args.n_last_blocks, args.avgpool_patchtokens)
-        print(f"Accuracy of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
-        return
-
-    train_transform = pth_transforms.Compose([
-        pth_transforms.RandomResizedCrop(224),
-        pth_transforms.RandomHorizontalFlip(),
-        pth_transforms.ToTensor(),
-        pth_transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
+    # Update the test_transform with additional transforms
+    test_transform = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Resize((IMG_SIZE, IMG_SIZE), antialias=True),
+        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
     ])
-    dataset_train = datasets.ImageFolder(os.path.join(args.data_path, "train"), transform=train_transform)
-    sampler = torch.utils.data.distributed.DistributedSampler(dataset_train)
-    train_loader = torch.utils.data.DataLoader(
-        dataset_train,
-        sampler=sampler,
-        batch_size=args.batch_size_per_gpu,
-        num_workers=args.num_workers,
-        pin_memory=True,
-    )
-    print(f"Data loaded with {len(dataset_train)} train and {len(dataset_val)} val imgs.")
 
-    # set optimizer
-    optimizer = torch.optim.SGD(
-        linear_classifier.parameters(),
-        args.lr * (args.batch_size_per_gpu * utils.get_world_size()) / 256., # linear scaling rule
-        momentum=0.9,
-        weight_decay=0, # we do not apply weight decay
-    )
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, args.epochs, eta_min=0)
+    trainset = torchvision.datasets.ImageFolder(root=TRAIN_INPUT, transform=train_transform)
+    testset = torchvision.datasets.ImageFolder(root=TEST_INPUT, transform=test_transform)
 
-    # Optionally resume from a checkpoint
-    to_restore = {"epoch": 0, "best_acc": 0.}
-    utils.restart_from_checkpoint(
-        os.path.join(args.output_dir, "checkpoint.pth.tar"),
-        run_variables=to_restore,
-        state_dict=linear_classifier,
-        optimizer=optimizer,
-        scheduler=scheduler,
-    )
-    start_epoch = to_restore["epoch"]
-    best_acc = to_restore["best_acc"]
+    if train_sample_size is not None:
+        # Randomly sample a subset of the training set
+        trainset = torch.utils.data.random_split(trainset, [train_sample_size, len(trainset) - train_sample_size])[0]
 
-    for epoch in range(start_epoch, args.epochs):
-        train_loader.sampler.set_epoch(epoch)
+    if test_sample_size is not None:
+        # Randomly sample a subset of the test set
+        testset = torch.utils.data.random_split(testset, [test_sample_size, len(testset) - test_sample_size])[0]
 
-        train_stats = train(model, linear_classifier, optimizer, train_loader, epoch, args.n_last_blocks, args.avgpool_patchtokens)
-        scheduler.step()
+    # Create data loaders
+    trainloader = torch.utils.data.DataLoader(trainset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
+    testloader = torch.utils.data.DataLoader(testset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
 
-        log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
-                     'epoch': epoch}
-        if epoch % args.val_freq == 0 or epoch == args.epochs - 1:
-            test_stats = validate_network(val_loader, model, linear_classifier, args.n_last_blocks, args.avgpool_patchtokens)
-            print(f"Accuracy at epoch {epoch} of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
-            best_acc = max(best_acc, test_stats["acc1"])
-            print(f'Max accuracy so far: {best_acc:.2f}%')
-            log_stats = {**{k: v for k, v in log_stats.items()},
-                         **{f'test_{k}': v for k, v in test_stats.items()}}
-        if utils.is_main_process():
-            with (Path(args.output_dir) / "log.txt").open("a") as f:
-                f.write(json.dumps(log_stats) + "\n")
-            save_dict = {
-                "epoch": epoch + 1,
-                "state_dict": linear_classifier.state_dict(),
-                "optimizer": optimizer.state_dict(),
-                "scheduler": scheduler.state_dict(),
-                "best_acc": best_acc,
-            }
-            torch.save(save_dict, os.path.join(args.output_dir, "checkpoint.pth.tar"))
-    print("Training of the supervised linear classifier on frozen features completed.\n"
-                "Top-1 test accuracy: {acc:.1f}".format(acc=best_acc))
+    classes = trainset.classes
+    return trainloader, testloader, classes
+
+            
+        
+        
+        
+        
+def save_experiment(experiment_name, config, model, train_losses, test_losses, accuracies, base_dir="experiments"):
+    outdir = os.path.join(base_dir, experiment_name)
+    os.makedirs(outdir, exist_ok=True)
+
+    # Save the config
+    configfile = os.path.join(outdir, 'config.json')
+    with open(configfile, 'w') as f:
+        json.dump(config, f, sort_keys=True, indent=4)
+
+    # Save the metrics
+    jsonfile = os.path.join(outdir, 'metrics.json')
+    with open(jsonfile, 'w') as f:
+        data = {
+            'train_losses': train_losses,
+            'test_losses': test_losses,
+            'accuracies': accuracies,
+        }
+        json.dump(data, f, sort_keys=True, indent=4)
+
+    # Save the model
+    save_checkpoint(experiment_name, model, "final", base_dir=base_dir)
 
 
-def train(model, linear_classifier, optimizer, loader, epoch, n, avgpool):
-    linear_classifier.train()
-    metric_logger = utils.MetricLogger(delimiter="  ")
-    metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
-    header = 'Epoch: [{}]'.format(epoch)
-    for (inp, target) in metric_logger.log_every(loader, 20, header):
-        # move to gpu
-        inp = inp.cuda(non_blocking=True)
-        target = target.cuda(non_blocking=True)
+def save_checkpoint(experiment_name, model, epoch, base_dir="experiments"):
+    outdir = os.path.join(base_dir, experiment_name)
+    os.makedirs(outdir, exist_ok=True)
+    cpfile = os.path.join(outdir, f'model_{epoch}.pt')
+    torch.save(model.state_dict(), cpfile)
 
-        # forward
-        with torch.no_grad():
-            if "vit" in args.arch:
-                intermediate_output = model.get_intermediate_layers(inp, n)
-                output = torch.cat([x[:, 0] for x in intermediate_output], dim=-1)
-                if avgpool:
-                    output = torch.cat((output.unsqueeze(-1), torch.mean(intermediate_output[-1][:, 1:], dim=1).unsqueeze(-1)), dim=-1)
-                    output = output.reshape(output.shape[0], -1)
-            else:
-                output = model(inp)
-        output = linear_classifier(output)
 
-        # compute cross entropy loss
-        loss = nn.CrossEntropyLoss()(output, target)
+def load_experiment(experiment_name, checkpoint_name="model_final.pt", base_dir="experiments"):
+    outdir = os.path.join(base_dir, experiment_name)
+    # Load the config
+    configfile = os.path.join(outdir, 'config.json')
+    with open(configfile, 'r') as f:
+        config = json.load(f)
+    # Load the metrics
+    jsonfile = os.path.join(outdir, 'metrics.json')
+    with open(jsonfile, 'r') as f:
+        data = json.load(f)
+    train_losses = data['train_losses']
+    test_losses = data['test_losses']
+    accuracies = data['accuracies']
+    # Load the model
+    model = ViT(config)
+    cpfile = os.path.join(outdir, checkpoint_name)
+    model.load_state_dict(torch.load(cpfile))
+    return config, model, train_losses, test_losses, accuracies
 
-        # compute the gradients
-        optimizer.zero_grad()
-        loss.backward()
 
-        # step
-        optimizer.step()
-
-        # log 
-        torch.cuda.synchronize()
-        metric_logger.update(loss=loss.item())
-        metric_logger.update(lr=optimizer.param_groups[0]["lr"])
-    # gather the stats from all processes
-    metric_logger.synchronize_between_processes()
-    print("Averaged stats:", metric_logger)
-    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+def visualize_images():
+    trainset = torchvision.datasets.ImageFolder(root=TRAIN_INPUT, transform=transforms.Compose([
+            transforms.Resize((IMG_SIZE, IMG_SIZE), antialias=True),
+            transforms.ToTensor(),
+            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+        ])) 
+    classes = ('angry', 'disgust', 'fear', 'happy', 'neutral', 'sadness', "surprise")
+    # Pick 30 samples randomly
+    indices = torch.randperm(len(trainset))[:30]
+    # images = [np.asarray(trainset[i][0]) for i in indices]
+    images = [np.transpose(np.asarray(trainset[i][0]), (1, 2, 0)) for i in range(len(trainset))]
+    labels = [trainset[i][1] for i in indices]
+    # Visualize the images using matplotlib
+    fig = plt.figure(figsize=(10, 10))
+    for i in range(30):
+        ax = fig.add_subplot(6, 5, i+1, xticks=[], yticks=[])
+        ax.imshow(images[i])
+        ax.set_title(classes[labels[i]])
 
 
 @torch.no_grad()
-def validate_network(val_loader, model, linear_classifier, n, avgpool):
-    linear_classifier.eval()
-    metric_logger = utils.MetricLogger(delimiter="  ")
-    header = 'Test:'
-    for inp, target in metric_logger.log_every(val_loader, 20, header):
-        # move to gpu
-        inp = inp.cuda(non_blocking=True)
-        target = target.cuda(non_blocking=True)
+def visualize_attention(model, output=None, device="cuda"):
+    """
+    Visualize the attention maps of the first 4 images.
+    """
+    model.eval()
+    # Load random images
+    num_images = 30
+    testset = torchvision.datasets.ImageFolder(root=TEST_INPUT, transform=transforms.Compose([
+            transforms.Resize((IMG_SIZE, IMG_SIZE), antialias=True),
+            transforms.ToTensor(),
+            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+        ]))
+    classes = ('angry', 'disgust', 'fear', 'happy', 'neutral', 'sadness', "surprise")
+    # Pick 30 samples randomly
+    indices = torch.randperm(len(testset))[:num_images]
+    raw_images = [np.transpose(np.asarray(testset[i][0]), (1, 2, 0)) for i in range(len(testset))]
+    labels = [testset[i][1] for i in indices]
+    # Convert the images to tensors
+    test_transform = transforms.Compose(
+        [transforms.ToTensor(),
+        transforms.Resize((IMG_SIZE, IMG_SIZE), antialias=True),
+        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+    images = torch.stack([test_transform(image) for image in raw_images])
+    # Move the images to the device
+    images = images.to(device)
+    model = model.to(device)
+    # Get the attention maps from the last block
+    logits = model(images) 
+    attention_maps = model().get_last_attnetion
+    # Get the predictions
+    predictions = torch.argmax(logits, dim=1)
+    # Concatenate the attention maps from all blocks
+    attention_maps = torch.cat(attention_maps, dim=1)
+    # select only the attention maps of the CLS token
+    attention_maps = attention_maps[:, :, 0, 1:]
+    # Then average the attention maps of the CLS token over all the heads
+    attention_maps = attention_maps.mean(dim=1)
+    # Reshape the attention maps to a square
+    num_patches = attention_maps.size(-1)
+    size = int(math.sqrt(num_patches))
+    attention_maps = attention_maps.view(-1, size, size)
+    # Resize the map to the size of the image
+    attention_maps = attention_maps.unsqueeze(1)
+    attention_maps = F.interpolate(attention_maps, size=(IMG_SIZE, IMG_SIZE), mode='bilinear', align_corners=False)
+    attention_maps = attention_maps.squeeze(1)
+    # Plot the images and the attention maps
+    fig = plt.figure(figsize=(20, 10))
+    mask = np.concatenate([np.ones((IMG_SIZE, IMG_SIZE)), np.zeros((IMG_SIZE, IMG_SIZE))], axis=1)
+    for i in range(num_images):
+        ax = fig.add_subplot(6, 5, i+1, xticks=[], yticks=[])
+        img = np.concatenate((raw_images[i], raw_images[i]), axis=1)
+        ax.imshow(img)
+        # Mask out the attention map of the left image
+        extended_attention_map = np.concatenate((np.zeros((IMG_SIZE, IMG_SIZE)), attention_maps[i].cpu()), axis=1)
+        extended_attention_map = np.ma.masked_where(mask==1, extended_attention_map)
+        ax.imshow(extended_attention_map, alpha=0.5, cmap='jet')
+        # Show the ground truth and the prediction
+        gt = classes[labels[i]]
+        pred = classes[predictions[i]]
+        ax.set_title(f"gt: {gt} / pred: {pred}", color=("green" if gt==pred else "red"))
+    if output is not None:
+        plt.savefig(output)
+    plt.show()        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+exp_name = 'vit-with-25-epochs' #@param {type:"string"}
+batch_size = 32 #@param {type: "integer"}
+epochs = 25 #@param {type: "integer"}
+lr = 1e-2  #@param {type: "number"}
+save_model_every = 0 #@param {type: "integer"}
 
-        # forward
+import torch
+from torch import nn, optim
+#This is not needed for kaggle, may be necessary later
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+
+# These are not hard constraints, but are used to prevent misconfigurations
+assert int(config["PARAMETERS"]["hidden_size"]) % int(config["PARAMETERS"]["num_attention_heads"]) == 0
+assert eval(config["PARAMETERS"]['intermediate_size']) == 4 * int(config["PARAMETERS"]['hidden_size']) 
+assert int(config["PARAMETERS"]['image_size']) % int(config["PARAMETERS"]['patch_size']) == 0
+
+
+
+
+class Trainer:
+    """
+    The simple trainer.
+    """
+
+    def __init__(self, model, optimizer, loss_fn, exp_name, device):
+        self.model = model.to(device)
+        self.optimizer = optimizer
+        self.loss_fn = loss_fn
+        self.exp_name = exp_name
+        self.device = device
+        self.model = model
+
+    def train(self, trainloader, testloader, epochs, save_model_every_n_epochs=0):
+        """
+        Train the model for the specified number of epochs.
+        """
+        # Keep track of the losses and accuracies
+        train_losses, test_losses, accuracies = [], [], []
+        # Train the model
+        for i in range(epochs):
+            train_loss = self.train_epoch(trainloader)
+            accuracy, test_loss = self.evaluate(testloader)
+            train_losses.append(train_loss)
+            test_losses.append(test_loss)
+            accuracies.append(accuracy)
+            print(f"Epoch: {i+1}, Train loss: {train_loss:.4f}, Test loss: {test_loss:.4f}, Accuracy: {accuracy:.4f}")
+            if save_model_every_n_epochs > 0 and (i+1) % save_model_every_n_epochs == 0 and i+1 != epochs:
+                print('\tSave checkpoint at epoch', i+1)
+                save_checkpoint(self.exp_name, self.model, i+1)
+        # Save the experiment
+        save_experiment(self.exp_name, config, self.model, train_losses, test_losses, accuracies)
+
+    def train_epoch(self, trainloader):
+        """
+        Train the model for one epoch.
+        """
+        self.model.train()
+        total_loss = 0
+        for batch in trainloader:
+            # Move the batch to the device
+            batch = [t.to(self.device) for t in batch]
+            images, labels = batch
+            # Zero the gradients
+            self.optimizer.zero_grad()
+            # Calculate the loss
+            loss = self.loss_fn(self.model(images)[0], labels)
+            # Backpropagate the loss
+            loss.backward()
+            # Update the model's parameters
+            self.optimizer.step()
+            total_loss += loss.item() * len(images)
+        return total_loss / len(trainloader.dataset)
+
+    @torch.no_grad()
+    def evaluate(self, testloader):
+        self.model.eval()
+        total_loss = 0
+        correct = 0
         with torch.no_grad():
-            if "vit" in args.arch:
-                intermediate_output = model.get_intermediate_layers(inp, n)
-                output = torch.cat([x[:, 0] for x in intermediate_output], dim=-1)
-                if avgpool:
-                    output = torch.cat((output.unsqueeze(-1), torch.mean(intermediate_output[-1][:, 1:], dim=1).unsqueeze(-1)), dim=-1)
-                    output = output.reshape(output.shape[0], -1)
-            else:
-                output = model(inp)
-        output = linear_classifier(output)
-        loss = nn.CrossEntropyLoss()(output, target)
+            for batch in testloader:
+                # Move the batch to the device
+                batch = [t.to(self.device) for t in batch]
+                images, labels = batch
 
-        if linear_classifier.module.num_labels >= 5:
-            acc1, acc5 = utils.accuracy(output, target, topk=(1, 5))
-        else:
-            acc1, = utils.accuracy(output, target, topk=(1,))
+                # Get predictions
+                logits  = self.model(images)
 
-        batch_size = inp.shape[0]
-        metric_logger.update(loss=loss.item())
-        metric_logger.meters['acc1'].update(acc1.item(), n=batch_size)
-        if linear_classifier.module.num_labels >= 5:
-            metric_logger.meters['acc5'].update(acc5.item(), n=batch_size)
-    if linear_classifier.module.num_labels >= 5:
-        print('* Acc@1 {top1.global_avg:.3f} Acc@5 {top5.global_avg:.3f} loss {losses.global_avg:.3f}'
-          .format(top1=metric_logger.acc1, top5=metric_logger.acc5, losses=metric_logger.loss))
-    else:
-        print('* Acc@1 {top1.global_avg:.3f} loss {losses.global_avg:.3f}'
-          .format(top1=metric_logger.acc1, losses=metric_logger.loss))
-    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+                # Calculate the loss
+                loss = self.loss_fn(logits, labels)
+                total_loss += loss.item() * len(images)
+
+                # Calculate the accuracy
+                predictions = torch.argmax(logits, dim=1)
+                correct += torch.sum(predictions == labels).item()
+        accuracy = correct / len(testloader.dataset)
+        avg_loss = total_loss / len(testloader.dataset)
+        return accuracy, avg_loss
 
 
-class LinearClassifier(nn.Module):
-    """Linear layer to train on top of frozen features"""
-    def __init__(self, dim, num_labels=7):
-        super(LinearClassifier, self).__init__()
-        self.num_labels = num_labels
-        self.linear = nn.Linear(dim, num_labels)
-        self.linear.weight.data.normal_(mean=0.0, std=0.01)
-        self.linear.bias.data.zero_()
-
-    def forward(self, x):
-        # flatten
-        x = x.view(x.size(0), -1)
-
-        # linear layer
-        return self.linear(x)
+def main():
+    # Training parameters
+    save_model_every_n_epochs = save_model_every
+    # Load the FER2013 dataset
+    trainloader, testloader, _ = prepare_data(batch_size=batch_size)
+    # Create the model, optimizer, loss function and trainer
+    model = ViT(config,
+                img_size = IMG_SIZE,
+                patch_size= 16,
+                in_chans= 1,
+                num_classes= 7,
+                embed_dim=768)
+    optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-2)
+#     optimizer = optim.SGD(model.parameters(), lr = lr, weight_decay = 1e-2, momentum = 0.9)
+    # linear_classifier = LinearClassifier()
+    # linear_classifier.train()
+    loss_fn = nn.CrossEntropyLoss()
+    
+    trainer = Trainer(model, optimizer, loss_fn, exp_name, device=device)
+    trainer.train(trainloader, testloader, epochs, save_model_every_n_epochs=save_model_every_n_epochs)
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser('Evaluation with linear classification on ImageNet')
-    parser.add_argument('--n_last_blocks', default=4, type=int, help="""Concatenate [CLS] tokens
-        for the `n` last blocks. We use `n=4` when evaluating ViT-Small and `n=1` with ViT-Base.""")
-    parser.add_argument('--avgpool_patchtokens', default=False, type=utils.bool_flag,
-        help="""Whether ot not to concatenate the global average pooled features to the [CLS] token.
-        We typically set this to False for ViT-Small and to True with ViT-Base.""")
-    parser.add_argument('--patch_size', default=16, type=int, help='Patch resolution of the model.')
-    parser.add_argument('--pretrained_weights', default='', type=str, help="Path to pretrained weights to evaluate.")
-    parser.add_argument("--checkpoint_key", default="teacher", type=str, help='Key to use in the checkpoint (example: "teacher")')
-    parser.add_argument('--epochs', default=100, type=int, help='Number of epochs of training.')
-    parser.add_argument("--lr", default=0.001, type=float, help="""Learning rate at the beginning of
-        training (highest LR used during training). The learning rate is linearly scaled
-        with the batch size, and specified here for a reference batch size of 256.
-        We recommend tweaking the LR depending on the checkpoint evaluated.""")
-    parser.add_argument('--batch_size_per_gpu', default=128, type=int, help='Per-GPU batch-size')
-    parser.add_argument("--dist_url", default="env://", type=str, help="""url used to set up
-        distributed training; see https://pytorch.org/docs/stable/distributed.html""")
-    parser.add_argument("--local_rank", default=0, type=int, help="Please ignore and do not set this argument.")
-    parser.add_argument('--data_path', default='/path/to/imagenet/', type=str)
-    parser.add_argument('--num_workers', default=10, type=int, help='Number of data loading workers per GPU.')
-    parser.add_argument('--val_freq', default=1, type=int, help="Epoch frequency for validation.")
-    parser.add_argument('--output_dir', default=".", help='Path to save logs and checkpoints')
-    parser.add_argument('--num_labels', default=1000, type=int, help='Number of labels for linear classifier')
-    parser.add_argument('--evaluate', dest='evaluate', action='store_true', help='evaluate model on validation set')
-    args = parser.parse_args()
-    eval_linear(args)
+    main()

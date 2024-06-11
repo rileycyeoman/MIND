@@ -9,6 +9,8 @@ import configparser
 config = configparser.ConfigParser()
 
 
+
+
 def drop_path(x, drop_prob: float = 0., training: bool = False):
     return x
     # if drop_prob == 0. or not training:
@@ -96,10 +98,10 @@ class PatchEmbeddings(nn.Module):
         patch_size:int = 16,
         in_channels:int = 3) -> None: 
         super().__init__()
-        self.img_size = config["image_size"] #(h,w)
-        self.patch_size = config["patch_size"] # 16
-        self.in_channels = config["num_channels"] # 1 or 3
-        self.hidden_size = config["hidden_size"] #usually 768
+        self.img_size = config["PARAMETERS"]["image_size"] #(h,w)
+        self.patch_size = config["PARAMETERS"]["patch_size"] # 16
+        self.in_channels = config["PARAMETERS"]["num_channels"] # 1 or 3
+        self.hidden_size = config["PARAMETERS"]["hidden_size"] #usually 768
         
         self.num_patches = (self.img_size // self.patch_size) ** 2 # (h * w)/p^2
         self.proj = nn.Conv2d(in_channels= self.in_channels, 
@@ -159,10 +161,10 @@ class MLP(nn.Module):
     """
     def __init__(self, config):
         super().__init__()
-        self.fc1= nn.Linear(config["hidden_size"], config["intermediate_size"])
+        self.fc1= nn.Linear(config["PARAMETERS"]["hidden_size"], config["PARAMETERS"]["intermediate_size"])
         self.act = nn.GELU()
-        self.fc2 = nn.Linear(config["intermediate_size"], config["hidden_size"])
-        self.drop = nn.Dropout(config["hidden_dropout_prob"])
+        self.fc2 = nn.Linear(config["PARAMETERS"]["intermediate_size"], config["PARAMETERS"]["hidden_size"])
+        self.drop = nn.Dropout(config["PARAMETERS"]["hidden_dropout_prob"])
 
     def forward(self, x):
         x = self.fc1(x)
@@ -190,7 +192,7 @@ class Block(nn.Module):
     ) -> None:
         super().__init__()
         self.config = config
-        dim = config["hidden_size"]
+        dim = config["PARAMETERS"]["hidden_size"]
         self.norm1 = norm_layer(dim)
         self.norm2 = norm_layer(dim)
         self.mlp = MLP(config)
@@ -225,9 +227,9 @@ class ViT(nn.Module):
                  drop_path_rate=0., norm_layer=nn.LayerNorm, **kwargs): #TODO: FIX NORM LAYER BEING CALLED OUT EARLIER?
         super().__init__()
         self.config = config
-        self.image_size = config["image_size"]
-        self.hidden_size = self.num_features = config["hidden_size"]
-        self.num_classes = config["num_classes"]
+        self.image_size = config["PARAMETERS"]["image_size"]
+        self.hidden_size = self.num_features = config["PARAMETERS"]["hidden_size"]
+        self.num_classes = config["PARAMETERS"]["num_classes"]
         # Create the embedding module
         self.patch_embed = PatchEmbeddings(config)
         num_patches = self.patch_embed.num_patches
