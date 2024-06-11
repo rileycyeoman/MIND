@@ -16,26 +16,26 @@ from ViTransformer import ViT
 configs = configparser.ConfigParser()
 configs.read('config.ini')
 config = {
-    TRAIN_INPUT = configs["DATA"]['TRAIN_INPUT'],
-    TEST_INPUT = configs["DATA"]['TEST_INPUT'],
-    patch_size = configs.getint["PARAMETERS", "patch_size"],
-    hidden_size = configs.getint["PARAMETERS", "hidden_size"],
-    num_hidden_layers = configs.getint["PARAMETERS", "num_hidden_layers"],
-    num_attention_heads = configs.getint["PARAMETERS", "num_attention_heads"],
-    intermediate_size = configs.getint["PARAMETERS", "intermediate_size"],
-    hidden_dropout_prob = configs.getfloat["PARAMETERS", "hidden_dropout_prob"],
-    attention_probs_dropout_prob = configs.getfloat["PARAMETERS", "attention_probs_dropout_prob"],
-    initializer_range = configs.getfloat["PARAMETERS", "initializer_range"],
-    image_size = configs.getint["PARAMETERS", "image_size"],
-    num_classes = configs.getint["PARAMETERS", "num_classes"],
-    num_channels = configs.getint["PARAMETERS", "num_channels"],
-    qkv_bias = configs.getboolean["PARAMETERS", "qkv_bias"],
-    use_faster_attention = configs.getboolean["PARAMETERS", "use_faster_attention"]
+    "TRAIN_INPUT": configs["DATA"]['TRAIN_INPUT'],
+    "TEST_INPUT": configs["DATA"]['TEST_INPUT'],
+    "patch_size": configs.getint("PARAMETERS", "patch_size"),
+    "hidden_size": configs.getint("PARAMETERS", "hidden_size"),
+    "num_hidden_layers": configs.getint("PARAMETERS", "num_hidden_layers"),
+    "num_attention_heads": configs.getint("PARAMETERS", "num_attention_heads"),
+    "intermediate_size": configs.getint("PARAMETERS", "intermediate_size"),
+    "hidden_dropout_prob": configs.getfloat("PARAMETERS", "hidden_dropout_prob"),
+    "attention_probs_dropout_prob": configs.getfloat("PARAMETERS", "attention_probs_dropout_prob"),
+    "initializer_range": configs.getfloat("PARAMETERS", "initializer_range"),
+    "image_size": configs.getint("PARAMETERS", "image_size"),
+    "num_classes": configs.getint("PARAMETERS", "num_classes"),
+    "num_channels": configs.getint("PARAMETERS", "num_channels"),
+    "qkv_bias": configs.getboolean("PARAMETERS", "qkv_bias"),
+    "use_faster_attention": configs.getboolean("PARAMETERS", "use_faster_attention")
 }
-
-IMG_SIZE = config["PARAMETERS"]["image_size"]
-TRAIN_INPUT = config["DATA"]['TRAIN_INPUT']
-TEST_INPUT = config["DATA"]['TEST_INPUT']
+print(config["patch_size"])
+# IMG_SIZE = config["PARAMETERS"]["image_size"]
+# TRAIN_INPUT = config["DATA"]['TRAIN_INPUT']
+# TEST_INPUT = config["DATA"]['TEST_INPUT']
 def prepare_data(batch_size=4, num_workers=2, train_sample_size=None, test_sample_size=None):
     # Define additional transforms for performance improvement
     additional_transforms = [
@@ -47,22 +47,22 @@ def prepare_data(batch_size=4, num_workers=2, train_sample_size=None, test_sampl
     # Update the train_transform with additional transforms
     train_transform = transforms.Compose([
         transforms.ToTensor(),
-        transforms.Resize((IMG_SIZE, IMG_SIZE), antialias=True),
+        transforms.Resize((config["image_size"], config["image_size"]), antialias=True),
         transforms.RandomApply(additional_transforms, p=0.5),
         transforms.RandomHorizontalFlip(p=0.5),
-        transforms.RandomResizedCrop((IMG_SIZE, IMG_SIZE), scale=(0.8, 1.0), ratio=(0.75, 1.3333333333333333), interpolation=2, antialias=True),
+        transforms.RandomResizedCrop((config["image_size"], config["image_size"]), scale=(0.8, 1.0), ratio=(0.75, 1.3333333333333333), interpolation=2, antialias=True),
         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
     ])
 
     # Update the test_transform with additional transforms
     test_transform = transforms.Compose([
         transforms.ToTensor(),
-        transforms.Resize((IMG_SIZE, IMG_SIZE), antialias=True),
+        transforms.Resize((config["image_size"], config["image_size"]), antialias=True),
         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
     ])
 
-    trainset = torchvision.datasets.ImageFolder(root=TRAIN_INPUT, transform=train_transform)
-    testset = torchvision.datasets.ImageFolder(root=TEST_INPUT, transform=test_transform)
+    trainset = torchvision.datasets.ImageFolder(root=config["TRAIN_INPUT"], transform=train_transform)
+    testset = torchvision.datasets.ImageFolder(root=config["TEST_INPUT"], transform=test_transform)
 
     if train_sample_size is not None:
         # Randomly sample a subset of the training set
@@ -135,8 +135,8 @@ def load_experiment(experiment_name, checkpoint_name="model_final.pt", base_dir=
 
 
 def visualize_images():
-    trainset = torchvision.datasets.ImageFolder(root=TRAIN_INPUT, transform=transforms.Compose([
-            transforms.Resize((IMG_SIZE, IMG_SIZE), antialias=True),
+    trainset = torchvision.datasets.ImageFolder(root=config["TRAIN_INPUT"], transform=transforms.Compose([
+            transforms.Resize((config["image_size"],config["image_size"]), antialias=True),
             transforms.ToTensor(),
             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
         ])) 
@@ -162,8 +162,8 @@ def visualize_attention(model, output=None, device="cuda"):
     model.eval()
     # Load random images
     num_images = 30
-    testset = torchvision.datasets.ImageFolder(root=TEST_INPUT, transform=transforms.Compose([
-            transforms.Resize((IMG_SIZE, IMG_SIZE), antialias=True),
+    testset = torchvision.datasets.ImageFolder(root=config["TEST_INPUT"], transform=transforms.Compose([
+            transforms.Resize((config["image_size"], config["image_size"]), antialias=True),
             transforms.ToTensor(),
             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
         ]))
@@ -175,7 +175,7 @@ def visualize_attention(model, output=None, device="cuda"):
     # Convert the images to tensors
     test_transform = transforms.Compose(
         [transforms.ToTensor(),
-        transforms.Resize((IMG_SIZE, IMG_SIZE), antialias=True),
+        transforms.Resize((config["image_size"], config["image_size"]), antialias=True),
         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
     images = torch.stack([test_transform(image) for image in raw_images])
     # Move the images to the device
@@ -198,17 +198,17 @@ def visualize_attention(model, output=None, device="cuda"):
     attention_maps = attention_maps.view(-1, size, size)
     # Resize the map to the size of the image
     attention_maps = attention_maps.unsqueeze(1)
-    attention_maps = F.interpolate(attention_maps, size=(IMG_SIZE, IMG_SIZE), mode='bilinear', align_corners=False)
+    attention_maps = F.interpolate(attention_maps, size=(config["image_size"], config["image_size"]), mode='bilinear', align_corners=False)
     attention_maps = attention_maps.squeeze(1)
     # Plot the images and the attention maps
     fig = plt.figure(figsize=(20, 10))
-    mask = np.concatenate([np.ones((IMG_SIZE, IMG_SIZE)), np.zeros((IMG_SIZE, IMG_SIZE))], axis=1)
+    mask = np.concatenate([np.ones((config["image_size"], config["image_size"])), np.zeros((config["image_size"], config["image_size"]))], axis=1)
     for i in range(num_images):
         ax = fig.add_subplot(6, 5, i+1, xticks=[], yticks=[])
         img = np.concatenate((raw_images[i], raw_images[i]), axis=1)
         ax.imshow(img)
         # Mask out the attention map of the left image
-        extended_attention_map = np.concatenate((np.zeros((IMG_SIZE, IMG_SIZE)), attention_maps[i].cpu()), axis=1)
+        extended_attention_map = np.concatenate((np.zeros((config["image_size"], config["image_size"])), attention_maps[i].cpu()), axis=1)
         extended_attention_map = np.ma.masked_where(mask==1, extended_attention_map)
         ax.imshow(extended_attention_map, alpha=0.5, cmap='jet')
         # Show the ground truth and the prediction
@@ -240,9 +240,9 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 
 # These are not hard constraints, but are used to prevent misconfigurations
-assert int(config["PARAMETERS"]["hidden_size"]) % int(config["PARAMETERS"]["num_attention_heads"]) == 0
-assert eval(config["PARAMETERS"]['intermediate_size']) == 4 * int(config["PARAMETERS"]['hidden_size']) 
-assert int(config["PARAMETERS"]['image_size']) % int(config["PARAMETERS"]['patch_size']) == 0
+assert int(config["hidden_size"]) % int(config["num_attention_heads"]) == 0
+assert eval(config['intermediate_size']) == 4 * int(config['hidden_size']) 
+assert int(config['image_size']) % int(config['patch_size']) == 0
 
 
 
