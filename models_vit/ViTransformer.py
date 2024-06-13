@@ -6,10 +6,21 @@ import math
 import torch
 import configparser
 
+
 config = configparser.ConfigParser()
-
-
-
+config.read('config.ini')
+PATCH_SIZE = config.getint("PARAMETERS", "patch_size")
+HIDDEN_SIZE = config.getint("PARAMETERS", "hidden_size")
+NUM_HIDDEN_LAYERS = config.getint("PARAMETERS", "num_hidden_layers")
+NUM_ATTENTION_HEADS = config.getint("PARAMETERS", "num_attention_heads")
+INTERMEDIATE_SIZE = config.getint("PARAMETERS", "intermediate_size")
+HIDDEN_DROPOUT_PROB = config.getfloat("PARAMETERS", "hidden_dropout_prob")
+ATTENTION_PROBS_DROPOUT_PROB = config.getfloat("PARAMETERS", "attention_probs_dropout_prob")
+INITIALIZER_RANGE = config.getfloat("PARAMETERS", "initializer_range")
+IMAGE_SIZE = config.getint("PARAMETERS", "image_size")
+NUM_CLASSES = config.getint("PARAMETERS", "num_classes")
+NUM_CHANNELS = config.getint("PARAMETERS", "num_channels")
+QKV_BIAS = config.getboolean("PARAMETERS", "qkv_bias")
 
 def drop_path(x, drop_prob: float = 0., training: bool = False):
     return x
@@ -92,16 +103,15 @@ class PatchEmbeddings(nn.Module):
     """
 
     def __init__(
-        self, 
-        config, 
+        self,  
         img_size: int = 48, 
         patch_size:int = 16,
         in_channels:int = 3) -> None: 
         super().__init__()
-        self.img_size = config["PARAMETERS"]["image_size"] #(h,w)
-        self.patch_size = config["PARAMETERS"]["patch_size"] # 16
-        self.in_channels = config["PARAMETERS"]["num_channels"] # 1 or 3
-        self.hidden_size = config["PARAMETERS"]["hidden_size"] #usually 768
+        self.img_size = IMAGE_SIZE #(h,w)
+        self.patch_size = PATCH_SIZE # 16
+        self.in_channels = NUM_CHANNELS # 1 or 3
+        self.hidden_size = HIDDEN_SIZE #usually 768
         
         self.num_patches = (self.img_size // self.patch_size) ** 2 # (h * w)/p^2
         self.proj = nn.Conv2d(in_channels= self.in_channels, 
@@ -120,19 +130,18 @@ class Embeddings(nn.Module):
     Combine the patch embeddings with the class token and position embeddings. 
     """
 
-    def __init__(self, config):
+    def __init__(self):
         super().__init__()
-        self.config = config
-        self.patch_embeddings = PatchEmbeddings(config)
+        self.patch_embeddings = PatchEmbeddings()
         # Create a learnable [CLS] token
         # Similar to BERT, the [CLS] token is added to the beginning of the input sequence
         # and is used to classify the entire sequence
-        self.cls_token = nn.Parameter(torch.randn(1, 1, config["hidden_size"]))
+        self.cls_token = nn.Parameter(torch.randn(1, 1, HIDDEN_SIZE))
         # Create position embeddings for the [CLS] token and the patch embeddings
         # Add 1 to the sequence length for the [CLS] token
         self.position_embeddings = \
-            nn.Parameter(torch.randn(1, self.patch_embeddings.num_patches + 1, config["hidden_size"]))
-        self.dropout = nn.Dropout(config["hidden_dropout_prob"])
+            nn.Parameter(torch.randn(1, self.patch_embeddings.num_patches + 1, HIDDEN_SIZE))
+        self.dropout = nn.Dropout(HIDDEN_DROPOUT_PROB)
                 
         
 
@@ -159,12 +168,15 @@ class MLP(nn.Module):
     """
     A multi-layer perceptron module.
     """
-    def __init__(self, config):
+    def __init__(self):
         super().__init__()
-        self.fc1= nn.Linear(config["PARAMETERS"]["hidden_size"], config["PARAMETERS"]["intermediate_size"])
+        self.fc1 = nn.Linear(in_features=HIDDEN_SIZE,out_features=INTERMEDIATE_SIZE)
+        # self.fc1= nn.Linear(HIDDEN_SIZE, INTERMEDIATE_SIZE)
         self.act = nn.GELU()
-        self.fc2 = nn.Linear(config["PARAMETERS"]["intermediate_size"], config["PARAMETERS"]["hidden_size"])
-        self.drop = nn.Dropout(config["PARAMETERS"]["hidden_dropout_prob"])
+        self.fc2 = nn.Linear(in_features=INTERMEDIATE_SIZE,out_features=HIDDEN_SIZE)
+        # self.fc2 = nn.Linear(INTERMEDIATE_SIZE, HIDDEN_SIZE)
+        self.drop = nn.Dropout(p = HIDDEN_DROPOUT_PROB)
+        # self.drop = nn.Dropout(HIDDEN_DROPOUT_PROB)
 
     def forward(self, x):
         x = self.fc1(x)
@@ -191,11 +203,10 @@ class Block(nn.Module):
             norm_layer: nn.Module = nn.LayerNorm
     ) -> None:
         super().__init__()
-        self.config = config
-        dim = config["PARAMETERS"]["hidden_size"]
+        dim = HIDDEN_SIZE
         self.norm1 = norm_layer(dim)
         self.norm2 = norm_layer(dim)
-        self.mlp = MLP(config)
+        self.mlp = MLP()
         self.attn = Attention(
             dim,
             num_heads=num_heads,
@@ -222,16 +233,15 @@ class ViT(nn.Module):
     The ViT model for classification.
     """
 
-    def __init__(self, config, img_size=[48], patch_size=16, in_chans=3, num_classes=7, embed_dim=768, depth=12,
+    def __init__(self, img_size=[48], patch_size=16, in_chans=3, num_classes=7, embed_dim=768, depth=12,
                  num_heads=12, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop_rate=0., attn_drop_rate=0.,
                  drop_path_rate=0., norm_layer=nn.LayerNorm, **kwargs): #TODO: FIX NORM LAYER BEING CALLED OUT EARLIER?
         super().__init__()
-        self.config = config
-        self.image_size = config["PARAMETERS"]["image_size"]
-        self.hidden_size = self.num_features = config["PARAMETERS"]["hidden_size"]
-        self.num_classes = config["PARAMETERS"]["num_classes"]
+        self.img_size = IMAGE_SIZE
+        self.hidden_size = HIDDEN_SIZE
+        self.num_classes = NUM_CLASSES
         # Create the embedding module
-        self.patch_embed = PatchEmbeddings(config)
+        self.patch_embed = PatchEmbeddings()
         num_patches = self.patch_embed.num_patches
         self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
         self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, embed_dim))
