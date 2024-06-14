@@ -22,7 +22,11 @@ HIDDEN_SIZE = config.getint("PARAMETERS", "hidden_size")
 NUM_ATTENTION_HEADS = config.getint("PARAMETERS", "num_attention_heads")
 INTERMEDIATE_SIZE = config.get("PARAMETERS", "intermediate_size")
 IMAGE_SIZE = config.getint("PARAMETERS", "image_size")
-
+EXP_NAME = config["PARAMETERS"]["exp_name"]
+BATCH_SIZE = config.getint("PARAMETERS", "batch_size")
+EPOCHS = config.getint("PARAMETERS", "epochs")
+LR = config.getint("PARAMETERS", "lr")
+SAVE_MODEL_EVERY = config.getint("PARAMETERS", "save_model_every")
 
 
 def prepare_data(batch_size=4, num_workers=2, train_sample_size=None, test_sample_size=None):
@@ -216,11 +220,11 @@ def visualize_attention(model, output=None, device="cuda"):
         
         
         
-exp_name = 'vit-with-25-epochs' #@param {type:"string"}
-batch_size = 32 #@param {type: "integer"}
-epochs = 25 #@param {type: "integer"}
-lr = 1e-2  #@param {type: "number"}
-save_model_every = 0 #@param {type: "integer"}
+# exp_name = 'vit-with-25-epochs' #@param {type:"string"}
+# batch_size = 32 #@param {type: "integer"}
+# epochs = 25 #@param {type: "integer"}
+# lr = 1e-2  #@param {type: "number"}
+# save_model_every = 0 #@param {type: "integer"}
 
 import torch
 from torch import nn, optim
@@ -273,20 +277,22 @@ class Trainer:
         """
         Train the model for one epoch.
         """
+        scaler = torch.cuda.amp.GradScaler()
         self.model.train()
         total_loss = 0
         for batch in trainloader:
-            # Move the batch to the device
             batch = [t.to(self.device) for t in batch]
             images, labels = batch
-            # Zero the gradients
+
             self.optimizer.zero_grad()
-            # Calculate the loss
-            loss = self.loss_fn(self.model(images)[0], labels)
-            # Backpropagate the loss
-            loss.backward()
-            # Update the model's parameters
-            self.optimizer.step()
+
+            with torch.cuda.amp.autocast():
+                logits = self.model(images)
+                loss = self.loss_fn(logits, labels)
+
+            scaler.scale(loss).backward()
+            scaler.step(self.optimizer)
+            scaler.update()
             total_loss += loss.item() * len(images)
         return total_loss / len(trainloader.dataset)
 
@@ -318,23 +324,23 @@ class Trainer:
 
 def main():
     # Training parameters
-    save_model_every_n_epochs = save_model_every
+    save_model_every_n_epochs = SAVE_MODEL_EVERY
     # Load the FER2013 dataset
-    trainloader, testloader, _ = prepare_data(batch_size=batch_size)
+    trainloader, testloader, _ = prepare_data(batch_size=BATCH_SIZE)
     # Create the model, optimizer, loss function and trainer
     model = ViT(img_size = IMAGE_SIZE,
                 patch_size= 16,
                 in_chans= 1,
                 num_classes= 7,
                 embed_dim=768)
-    optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-2)
-#     optimizer = optim.SGD(model.parameters(), lr = lr, weight_decay = 1e-2, momentum = 0.9)
+    # optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-2)
+    optimizer = optim.SGD(model.parameters(), lr = LR, weight_decay = 1e-2, momentum = 0.9)
     # linear_classifier = LinearClassifier()
     # linear_classifier.train()
     loss_fn = nn.CrossEntropyLoss()
     
-    trainer = Trainer(model, optimizer, loss_fn, exp_name, device=device)
-    trainer.train(trainloader, testloader, epochs, save_model_every_n_epochs=save_model_every_n_epochs)
+    trainer = Trainer(model, optimizer, loss_fn, EXP_NAME, device=device)
+    trainer.train(trainloader, testloader, EPOCHS, save_model_every_n_epochs=save_model_every_n_epochs)
 
 
 if __name__ == '__main__':
