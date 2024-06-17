@@ -20,12 +20,14 @@ TEST_INPUT = config["DATA"]['TEST_INPUT']
 PATCH_SIZE = config.getint("PARAMETERS", "patch_size")
 HIDDEN_SIZE = config.getint("PARAMETERS", "hidden_size")
 NUM_ATTENTION_HEADS = config.getint("PARAMETERS", "num_attention_heads")
+NUM_CHANNELS = config.getint("PARAMETERS", "num_channels")
+NUM_CLASSES = config.getint("PARAMETERS", "num_classes")
 INTERMEDIATE_SIZE = config.get("PARAMETERS", "intermediate_size")
 IMAGE_SIZE = config.getint("PARAMETERS", "image_size")
 EXP_NAME = config["PARAMETERS"]["exp_name"]
 BATCH_SIZE = config.getint("PARAMETERS", "batch_size")
 EPOCHS = config.getint("PARAMETERS", "epochs")
-LR = config.getint("PARAMETERS", "lr")
+LR = config.getfloat("PARAMETERS", "lr")
 SAVE_MODEL_EVERY = config.getint("PARAMETERS", "save_model_every")
 
 
@@ -53,17 +55,32 @@ def prepare_data(batch_size=4, num_workers=2, train_sample_size=None, test_sampl
         transforms.Resize((IMAGE_SIZE, IMAGE_SIZE), antialias=True),
         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
     ])
-
-    trainset = torchvision.datasets.ImageFolder(root=TRAIN_INPUT, transform=train_transform)
-    testset = torchvision.datasets.ImageFolder(root=TEST_INPUT, transform=test_transform)
-
+    #use these for FER2013
+    # trainset = torchvision.datasets.ImageFolder(root=TRAIN_INPUT, transform=train_transform)
+    # testset = torchvision.datasets.ImageFolder(root=TEST_INPUT, transform=test_transform)
+    
+    # use these for CIFAR10
+    # trainset = torchvision.datasets.CIFAR10(root='./data', train=True,
+    #                                         download=True, transform=train_transform)
+    # testset = torchvision.datasets.CIFAR10(root='./data', train=False,
+    #                                     download=True, transform=test_transform)
+    
+    trainset = torchvision.datasets.Imagenette(root='./data', train=True,
+                                            download=True, transform=train_transform, size = "320px")
+    testset = torchvision.datasets.Imagenette(root='./data', train=False,
+                                        download=True, transform=test_transform, size = "320px")
+    
     if train_sample_size is not None:
         # Randomly sample a subset of the training set
-        trainset = torch.utils.data.random_split(trainset, [train_sample_size, len(trainset) - train_sample_size])[0]
+        # trainset = torch.utils.data.random_split(trainset, [train_sample_size, len(trainset) - train_sample_size])[0]
+        indices = torch.randperm(len(trainset))[:train_sample_size]
+        trainset = torch.utils.data.Subset(trainset, indices)
 
     if test_sample_size is not None:
         # Randomly sample a subset of the test set
-        testset = torch.utils.data.random_split(testset, [test_sample_size, len(testset) - test_sample_size])[0]
+        # testset = torch.utils.data.random_split(testset, [test_sample_size, len(testset) - test_sample_size])[0]
+        indices = torch.randperm(len(testset))[:test_sample_size]
+        testset = torch.utils.data.Subset(testset, indices)
 
     # Create data loaders
     trainloader = torch.utils.data.DataLoader(trainset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
@@ -133,7 +150,11 @@ def visualize_images():
             transforms.ToTensor(),
             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
         ])) 
-    classes = ('angry', 'disgust', 'fear', 'happy', 'neutral', 'sadness', "surprise")
+    # classes = ('angry', 'disgust', 'fear', 'happy', 'neutral', 'sadness', "surprise")
+    # classes = ('plane', 'car', 'bird', 'cat',
+    #        'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
+    classes = ('tench', 'English springer', 'cassette player', 'chain saw', 'church', 
+               'French horn', 'garbage truck', 'gas pump', 'golf ball', 'parachute')
     # Pick 30 samples randomly
     indices = torch.randperm(len(trainset))[:30]
     # images = [np.asarray(trainset[i][0]) for i in indices]
@@ -160,7 +181,11 @@ def visualize_attention(model, output=None, device="cuda"):
             transforms.ToTensor(),
             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
         ]))
-    classes = ('angry', 'disgust', 'fear', 'happy', 'neutral', 'sadness', "surprise")
+    # classes = ('angry', 'disgust', 'fear', 'happy', 'neutral', 'sadness', "surprise")
+    # classes = ('plane', 'car', 'bird', 'cat',
+    #        'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
+    classes = ('tench', 'English springer', 'cassette player', 'chain saw', 'church', 
+               'French horn', 'garbage truck', 'gas pump', 'golf ball', 'parachute')
     # Pick 30 samples randomly
     indices = torch.randperm(len(testset))[:num_images]
     raw_images = [np.transpose(np.asarray(testset[i][0]), (1, 2, 0)) for i in range(len(testset))]
@@ -281,18 +306,17 @@ class Trainer:
         self.model.train()
         total_loss = 0
         for batch in trainloader:
+            # Move the batch to the device
             batch = [t.to(self.device) for t in batch]
             images, labels = batch
-
+            # Zero the gradients
             self.optimizer.zero_grad()
-
-            with torch.cuda.amp.autocast():
-                logits = self.model(images)
-                loss = self.loss_fn(logits, labels)
-
-            scaler.scale(loss).backward()
-            scaler.step(self.optimizer)
-            scaler.update()
+            # Calculate the loss
+            loss = self.loss_fn(self.model(images), labels)
+            # Backpropagate the loss
+            loss.backward()
+            # Update the model's parameters
+            self.optimizer.step()
             total_loss += loss.item() * len(images)
         return total_loss / len(trainloader.dataset)
 
@@ -329,12 +353,12 @@ def main():
     trainloader, testloader, _ = prepare_data(batch_size=BATCH_SIZE)
     # Create the model, optimizer, loss function and trainer
     model = ViT(img_size = IMAGE_SIZE,
-                patch_size= 16,
-                in_chans= 1,
-                num_classes= 7,
-                embed_dim=768)
-    # optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-2)
-    optimizer = optim.SGD(model.parameters(), lr = LR, weight_decay = 1e-2, momentum = 0.9)
+                patch_size= PATCH_SIZE,
+                in_chans= NUM_CHANNELS,
+                num_classes= NUM_CLASSES,
+                embed_dim= HIDDEN_SIZE)
+    optimizer = optim.AdamW(model.parameters(), lr=LR, weight_decay=1e-2)
+    # optimizer = optim.SGD(model.parameters(), lr = LR, weight_decay = 1e-2, momentum = 0.9)
     # linear_classifier = LinearClassifier()
     # linear_classifier.train()
     loss_fn = nn.CrossEntropyLoss()

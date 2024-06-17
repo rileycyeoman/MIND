@@ -104,8 +104,8 @@ class PatchEmbeddings(nn.Module):
 
     def __init__(
         self,  
-        img_size: int = 48, 
-        patch_size:int = 16,
+        img_size: int = 32, 
+        patch_size:int = 4,
         in_channels:int = 3) -> None: 
         super().__init__()
         self.img_size = IMAGE_SIZE #(h,w)
