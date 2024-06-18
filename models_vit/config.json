@@ -1,7 +1,19 @@
 {
     "DATA": {
       "TRAIN_INPUT": "/home/yeoman/research/train",
-      "TEST_INPUT": "/home/yeoman/research/test"
+      "TEST_INPUT": "/home/yeoman/research/test",
+      "CLASSES": [
+        "tench",
+        "English springer",
+        "cassette player",
+        "chain saw",
+        "church",
+        "French horn",
+        "garbage truck",
+        "gas pump",
+        "golf ball",
+        "parachute"
+      ]
     },
     "PARAMETERS": {
       "patch_size": 4,
