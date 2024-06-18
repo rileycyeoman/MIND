@@ -4,51 +4,52 @@ import torch
 from torch import nn
 import math
 import torch
-import configparser
+import json
 
-
-config = configparser.ConfigParser()
-config.read('config.ini')
-PATCH_SIZE = config.getint("PARAMETERS", "patch_size")
-HIDDEN_SIZE = config.getint("PARAMETERS", "hidden_size")
-NUM_HIDDEN_LAYERS = config.getint("PARAMETERS", "num_hidden_layers")
-NUM_ATTENTION_HEADS = config.getint("PARAMETERS", "num_attention_heads")
-INTERMEDIATE_SIZE = config.getint("PARAMETERS", "intermediate_size")
-HIDDEN_DROPOUT_PROB = config.getfloat("PARAMETERS", "hidden_dropout_prob")
-ATTENTION_PROBS_DROPOUT_PROB = config.getfloat("PARAMETERS", "attention_probs_dropout_prob")
-INITIALIZER_RANGE = config.getfloat("PARAMETERS", "initializer_range")
-IMAGE_SIZE = config.getint("PARAMETERS", "image_size")
-NUM_CLASSES = config.getint("PARAMETERS", "num_classes")
-NUM_CHANNELS = config.getint("PARAMETERS", "num_channels")
-QKV_BIAS = config.getboolean("PARAMETERS", "qkv_bias")
+with open('config.json', 'r') as json_file:
+    config = json.load(json_file)
+# config = configparser.ConfigParser()
+# config.read('config.ini')
+PATCH_SIZE = int(config['PARAMETERS']['patch_size'])
+HIDDEN_SIZE = int(config['PARAMETERS']['hidden_size'])
+NUM_HIDDEN_LAYERS = int(config['PARAMETERS']['num_hidden_layers'])
+NUM_ATTENTION_HEADS = int(config['PARAMETERS']['num_attention_heads'])
+INTERMEDIATE_SIZE = int(config['PARAMETERS']['intermediate_size'])
+HIDDEN_DROPOUT_PROB = float(config['PARAMETERS']['hidden_dropout_prob'])
+ATTENTION_PROBS_DROPOUT_PROB = float(config['PARAMETERS']['attention_probs_dropout_prob'])
+INITIALIZER_RANGE = float(config['PARAMETERS']['initializer_range'])
+IMAGE_SIZE = int(config['PARAMETERS']['image_size'])
+NUM_CLASSES = int(config['PARAMETERS']['num_classes'])
+NUM_CHANNELS = int(config['PARAMETERS']['num_channels'])
+QKV_BIAS = bool(config['PARAMETERS']['qkv_bias'])
 
 def drop_path(x, drop_prob: float = 0., training: bool = False):
-    return x
-    # if drop_prob == 0. or not training:
-    #     return x
-    # keep_prob = 1 - drop_prob
-    # shape = (x.shape[0],) + (1,) * (x.ndim - 1)  # work with diff dim tensors, not just 2D ConvNets
-    # random_tensor = keep_prob + torch.rand(shape, dtype=x.dtype, device=x.device)
-    # random_tensor.floor_()  # binarize
-    # output = x.div(keep_prob) * random_tensor
-    # return output
+    # return x
+    if drop_prob == 0. or not training:
+        return x
+    keep_prob = 1 - drop_prob
+    shape = (x.shape[0],) + (1,) * (x.ndim - 1)  # work with diff dim tensors, not just 2D ConvNets
+    random_tensor = keep_prob + torch.rand(shape, dtype=x.dtype, device=x.device)
+    random_tensor.floor_()  # binarize
+    output = x.div(keep_prob) * random_tensor
+    return output
 
-# class DropPath(nn.Module):
-#     """Drop paths (Stochastic Depth) per sample  (when applied in main path of residual blocks).
-#     """
-#     def __init__(self, drop_prob=None):
-#         super(DropPath, self).__init__()
-#         self.drop_prob = drop_prob
+class DropPath(nn.Module):
+    """Drop paths (Stochastic Depth) per sample  (when applied in main path of residual blocks).
+    """
+    def __init__(self, drop_prob=None):
+        super(DropPath, self).__init__()
+        self.drop_prob = drop_prob
 
-#     def forward(self, x):
-#         return drop_path(x, self.drop_prob, self.training)
+    def forward(self, x):
+        return drop_path(x, self.drop_prob, self.training)
 
 
 class Attention(nn.Module):
     def __init__(
         self,
         dim:             int,
-        num_heads:       int = 6,
+        num_heads:       int = 4,
         qkv_bias:        bool = False,
         qk_norm:         bool = False,
         attn_drop:       float = 0.,

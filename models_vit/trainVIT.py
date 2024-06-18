@@ -9,26 +9,29 @@ import matplotlib.pyplot as plt
 import numpy as np
 from torch.utils.data import DataLoader
 from torch.nn import functional as F
+from torch import optim
 import torchvision.transforms as transforms
-import configparser
 from ViTransformer import ViT
 
-config = configparser.ConfigParser()
-config.read('config.ini')
-TRAIN_INPUT = config["DATA"]['TRAIN_INPUT']
-TEST_INPUT = config["DATA"]['TEST_INPUT']
-PATCH_SIZE = config.getint("PARAMETERS", "patch_size")
-HIDDEN_SIZE = config.getint("PARAMETERS", "hidden_size")
-NUM_ATTENTION_HEADS = config.getint("PARAMETERS", "num_attention_heads")
-NUM_CHANNELS = config.getint("PARAMETERS", "num_channels")
-NUM_CLASSES = config.getint("PARAMETERS", "num_classes")
-INTERMEDIATE_SIZE = config.get("PARAMETERS", "intermediate_size")
-IMAGE_SIZE = config.getint("PARAMETERS", "image_size")
-EXP_NAME = config["PARAMETERS"]["exp_name"]
-BATCH_SIZE = config.getint("PARAMETERS", "batch_size")
-EPOCHS = config.getint("PARAMETERS", "epochs")
-LR = config.getfloat("PARAMETERS", "lr")
-SAVE_MODEL_EVERY = config.getint("PARAMETERS", "save_model_every")
+# config = configparser.ConfigParser()
+# config.read('config.ini')
+with open('config.json', 'r') as json_file:
+    config = json.load(json_file)
+    
+TRAIN_INPUT = config['DATA']['TRAIN_INPUT']
+TEST_INPUT = config['DATA']['TEST_INPUT']
+PATCH_SIZE = int(config['PARAMETERS']['patch_size'])
+HIDDEN_SIZE = int(config['PARAMETERS']['hidden_size'])
+NUM_ATTENTION_HEADS = int(config['PARAMETERS']['num_attention_heads'])
+NUM_CHANNELS = int(config['PARAMETERS']['num_channels'])
+NUM_CLASSES = int(config['PARAMETERS']['num_classes'])
+INTERMEDIATE_SIZE = int(config['PARAMETERS']['intermediate_size'])
+IMAGE_SIZE = int(config['PARAMETERS']['image_size'])
+EXP_NAME = config['PARAMETERS']['exp_name']
+BATCH_SIZE = int(config['PARAMETERS']['batch_size'])
+EPOCHS = int(config['PARAMETERS']['epochs'])
+LR = float(config['PARAMETERS']['lr'])
+SAVE_MODEL_EVERY = int(config['PARAMETERS']['save_model_every'])
 
 
 def prepare_data(batch_size=4, num_workers=2, train_sample_size=None, test_sample_size=None):
@@ -60,15 +63,15 @@ def prepare_data(batch_size=4, num_workers=2, train_sample_size=None, test_sampl
     # testset = torchvision.datasets.ImageFolder(root=TEST_INPUT, transform=test_transform)
     
     # use these for CIFAR10
-    # trainset = torchvision.datasets.CIFAR10(root='./data', train=True,
-    #                                         download=True, transform=train_transform)
-    # testset = torchvision.datasets.CIFAR10(root='./data', train=False,
-    #                                     download=True, transform=test_transform)
+    trainset = torchvision.datasets.CIFAR10(root='./data', train=True,
+                                            download=True, transform=train_transform)
+    testset = torchvision.datasets.CIFAR10(root='./data', train=False,
+                                        download=True, transform=test_transform)
     
-    trainset = torchvision.datasets.Imagenette(root='./data', train=True,
-                                            download=True, transform=train_transform, size = "320px")
-    testset = torchvision.datasets.Imagenette(root='./data', train=False,
-                                        download=True, transform=test_transform, size = "320px")
+    # trainset = torchvision.datasets.Imagenette(root='./data', train=True,
+    #                                         download=True, transform=train_transform, size = "320px")
+    # testset = torchvision.datasets.Imagenette(root='./data', train=False,
+    #                                     download=True, transform=test_transform, size = "320px")
     
     if train_sample_size is not None:
         # Randomly sample a subset of the training set
@@ -120,8 +123,8 @@ def save_experiment(experiment_name, config, model, train_losses, test_losses, a
 def save_checkpoint(experiment_name, model, epoch, base_dir="experiments"):
     outdir = os.path.join(base_dir, experiment_name)
     os.makedirs(outdir, exist_ok=True)
-    cpfile = os.path.join(outdir, f'model_{epoch}.pt')
-    torch.save(model.state_dict(), cpfile)
+    copyfile = os.path.join(outdir, f'model_{epoch}.pt')
+    torch.save(model.state_dict(), copyfile)
 
 
 def load_experiment(experiment_name, checkpoint_name="model_final.pt", base_dir="experiments"):
@@ -242,25 +245,15 @@ def visualize_attention(model, output=None, device="cuda"):
         
         
         
-        
-        
-        
-# exp_name = 'vit-with-25-epochs' #@param {type:"string"}
-# batch_size = 32 #@param {type: "integer"}
-# epochs = 25 #@param {type: "integer"}
-# lr = 1e-2  #@param {type: "number"}
-# save_model_every = 0 #@param {type: "integer"}
 
-import torch
-from torch import nn, optim
-#This is not needed for kaggle, may be necessary later
+# import torch
+# from torch import nn, optim
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-
-
+print("Using the", torch.cuda.get_device_name(0), "for training: ")
 # These are not hard constraints, but are used to prevent misconfigurations
-assert int(HIDDEN_SIZE) % int(NUM_ATTENTION_HEADS) == 0
-assert eval(INTERMEDIATE_SIZE) == 4 * int(HIDDEN_SIZE) 
-assert int(IMAGE_SIZE) % int(PATCH_SIZE) == 0
+assert HIDDEN_SIZE % NUM_ATTENTION_HEADS == 0, "The size of "
+assert INTERMEDIATE_SIZE == 4 * HIDDEN_SIZE, "The intermediate size is not 4 times the embedding/hidden size."
+assert IMAGE_SIZE % PATCH_SIZE == 0, "Image size is not divisible by patch size"
 
 
 
@@ -365,6 +358,7 @@ def main():
     
     trainer = Trainer(model, optimizer, loss_fn, EXP_NAME, device=device)
     trainer.train(trainloader, testloader, EPOCHS, save_model_every_n_epochs=save_model_every_n_epochs)
+    visualize_attention()
 
 
 if __name__ == '__main__':

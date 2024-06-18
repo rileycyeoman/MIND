@@ -1,2 +1,4 @@
 # Ignore the CIFAR-10 dataset
 /models_vit/data
+/models_vit/selfsupervised
+/models_vit/experiments

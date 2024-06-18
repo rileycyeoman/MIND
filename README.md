@@ -17,12 +17,19 @@ MIND is a machine learning model that combines META's DINO model and a Long Shor
 
 
 ## Previous Work
-### DINO
+### DINO and Self-Supervision
 
 ### TimeSformer
-
+While Meta's DINO model works with video to an extent, there is room for experimentation. TimeSformer utilizes temporal-spatial relationships between video frames and 
 
 ## Model
+Mental health Identification with No-label Distillation (MIND) utilizes the self-supervision of DINO with the time domain utilization of the LSTM. 
+
+<figure>
+  <img src="images/MIND.png" alt="MIND Model" title="MIND">
+  <figcaption>Figure x: Mind Model. N transformers being fed simultaneously into one cell of the LSTM. </figcaption>
+</figure>
+
 
 ## How to Use
 
