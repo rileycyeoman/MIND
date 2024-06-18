@@ -13,8 +13,6 @@ from torch import optim
 import torchvision.transforms as transforms
 from ViTransformer import ViT
 
-# config = configparser.ConfigParser()
-# config.read('config.ini')
 with open('config.json', 'r') as json_file:
     config = json.load(json_file)
     
@@ -36,15 +34,30 @@ SAVE_MODEL_EVERY = int(config['PARAMETERS']['save_model_every'])
 
 # Make the output satisfying
 class TextColors:
-    HEADER = '\033[95m'
-    OKBLUE = '\033[94m'
-    OKCYAN = '\033[96m'
-    OKGREEN = '\033[92m'
-    WARNING = '\033[93m'
-    FAIL = '\033[91m'
-    ENDC = '\033[0m'
-    BOLD = '\033[1m'
-    UNDERLINE = '\033[4m'
+    BLACK = "\033[0;30m"
+    RED = "\033[0;31m"
+    GREEN = "\033[0;32m"
+    BROWN = "\033[0;33m"
+    BLUE = "\033[0;34m"
+    PURPLE = "\033[0;35m"
+    CYAN = "\033[0;36m"
+    LIGHT_GRAY = "\033[0;37m"
+    DARK_GRAY = "\033[1;30m"
+    LIGHT_RED = "\033[1;31m"
+    LIGHT_GREEN = "\033[1;32m"
+    YELLOW = "\033[1;33m"
+    LIGHT_BLUE = "\033[1;34m"
+    LIGHT_PURPLE = "\033[1;35m"
+    LIGHT_CYAN = "\033[1;36m"
+    LIGHT_WHITE = "\033[1;37m"
+    BOLD = "\033[1m"
+    FAINT = "\033[2m"
+    ITALIC = "\033[3m"
+    UNDERLINE = "\033[4m"
+    BLINK = "\033[5m"
+    NEGATIVE = "\033[7m"
+    CROSSED = "\033[9m"
+    ENDC = "\033[0m"
 
 def prepare_data(batch_size=4, num_workers=2, train_sample_size=None, test_sample_size=None):
     # Define additional transforms for performance improvement
@@ -167,10 +180,10 @@ def load_experiment(experiment_name, checkpoint_name="model_final.pt", base_dir=
         
         
 
-# import torch
+
 # from torch import nn, optim
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-print(f"Using the {TextColors.OKGREEN}{torch.cuda.get_device_name(0)}{TextColors.ENDC} for training.")
+print(f"Using the {TextColors.PURPLE}{torch.cuda.get_device_name(0)}{TextColors.ENDC} for training.")
 # These are not hard constraints, but are used to prevent misconfigurations
 assert HIDDEN_SIZE % NUM_ATTENTION_HEADS == 0, "The size of "
 assert INTERMEDIATE_SIZE == 4 * HIDDEN_SIZE, "The intermediate size is not 4 times the embedding/hidden size."
@@ -184,9 +197,10 @@ class Trainer:
     The simple trainer.
     """
 
-    def __init__(self, model, optimizer, loss_fn, exp_name, device):
+    def __init__(self, model, optimizer, scheduler, loss_fn, exp_name, device):
         self.model = model.to(device)
         self.optimizer = optimizer
+        self.scheduler = scheduler
         self.loss_fn = loss_fn
         self.exp_name = exp_name
         self.device = device
@@ -198,17 +212,19 @@ class Trainer:
         """
         # Keep track of the losses and accuracies
         train_losses, test_losses, accuracies = [], [], []
+        
         # Train the model
         for i in range(epochs):
             train_loss = self.train_epoch(trainloader)
+            self.scheduler.step()
             accuracy, test_loss = self.evaluate(testloader)
             train_losses.append(train_loss)
             test_losses.append(test_loss)
             accuracies.append(accuracy)
-            print(f"{TextColors.HEADER}Epoch:{TextColors.ENDC} {i+1}") 
-            print(f"{TextColors.OKBLUE}Train loss:{TextColors.ENDC} {train_loss:.4f}")
-            print(f"{TextColors.OKCYAN}Test loss:{TextColors.ENDC} {test_loss:.4f}") 
-            print(f"{TextColors.OKGREEN}Accuracy:{TextColors.ENDC} {accuracy:.4f}\n")
+            print(f"{TextColors.LIGHT_BLUE}Epoch:{TextColors.ENDC} {i+1}") 
+            print(f"{TextColors.BLUE}Train loss:{TextColors.ENDC} {train_loss:.4f}")
+            print(f"{TextColors.CYAN}Test loss:{TextColors.ENDC} {test_loss:.4f}") 
+            print(f"{TextColors.GREEN}Accuracy:{TextColors.ENDC} {accuracy:.4f}\n")
             if save_model_every_n_epochs > 0 and (i+1) % save_model_every_n_epochs == 0 and i+1 != epochs:
                 print('\tSave checkpoint at epoch', i+1)
                 save_checkpoint(self.exp_name, self.model, i+1)
@@ -219,7 +235,7 @@ class Trainer:
         """
         Train the model for one epoch.
         """
-        scaler = torch.cuda.amp.GradScaler()
+        # scaler = torch.cuda.amp.GradScaler()
         self.model.train()
         total_loss = 0
         for batch in trainloader:
@@ -276,13 +292,15 @@ def main():
                 embed_dim= HIDDEN_SIZE)
     optimizer = optim.AdamW(model.parameters(), lr=LR, weight_decay=1e-2)
     # optimizer = optim.SGD(model.parameters(), lr = LR, weight_decay = 1e-2, momentum = 0.9)
+    scheduler = optim.lr_scheduler.ExponentialLR(optimizer=optimizer, gamma=0.9)
     # linear_classifier = LinearClassifier()
     # linear_classifier.train()
     loss_fn = nn.CrossEntropyLoss()
     
-    trainer = Trainer(model, optimizer, loss_fn, EXP_NAME, device=device)
+    trainer = Trainer(model, optimizer, scheduler, loss_fn, EXP_NAME, device=device)
+    print(f"{TextColors.BOLD}==============Training MIND=============={TextColors.ENDC}")
     trainer.train(trainloader, testloader, EPOCHS, save_model_every_n_epochs=save_model_every_n_epochs)
-
+    print(f"{TextColors.BOLD}==============Training done=============={TextColors.ENDC}")
 
 if __name__ == '__main__':
     main()

@@ -226,7 +226,7 @@ class Block(nn.Module):
         # x = x + self.drop_path(y)
         # x = x + self.drop_path(self.mlp(self.norm1(x)))
         x = x + y
-        x = x + self.mlp(self.norm1(x))
+        x = x + self.mlp(self.norm2(x))
         return x
 
 class ViT(nn.Module):
@@ -234,7 +234,7 @@ class ViT(nn.Module):
     The ViT model for classification.
     """
 
-    def __init__(self, img_size=[48], patch_size=16, in_chans=3, num_classes=7, embed_dim=768, depth=12,
+    def __init__(self, img_size=[32], patch_size=4, in_chans=3, num_classes=10, embed_dim=768, depth=12,
                  num_heads=12, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop_rate=0., attn_drop_rate=0.,
                  drop_path_rate=0., norm_layer=nn.LayerNorm, **kwargs): #TODO: FIX NORM LAYER BEING CALLED OUT EARLIER?
         super().__init__()
