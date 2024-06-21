@@ -27,6 +27,7 @@
       "image_size": 32,
       "num_classes": 10,
       "num_channels": 3,
+      "num_frames" : 200,
       "qkv_bias": true,
       "exp_name": "vit_with-25-epochs",
       "batch_size": 32,
