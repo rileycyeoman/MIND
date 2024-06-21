@@ -45,7 +45,13 @@ class DropPath(nn.Module):
     def forward(self, x):
         return drop_path(x, self.drop_prob, self.training)
 
-
+class GEGLU(nn.Module):
+    def forward(self, x):
+        x, gates = x.chunk(2, dim = -1)
+        return x * x.gelu()
+    
+    
+    
 class Attention(nn.Module):
     def __init__(
         self,

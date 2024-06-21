@@ -3,8 +3,11 @@ import math
 import torch
 from torch import nn
 import math
-import torch
+import torch.nn.functional as F
 import json
+from linformer import Linformer
+
+
 
 with open('config.json', 'r') as json_file:
     config = json.load(json_file)
@@ -34,6 +37,17 @@ def drop_path(x, drop_prob: float = 0., training: bool = False):
     output = x.div(keep_prob) * random_tensor
     return output
 
+# def get_EF(input_size, dim, bias = True):
+#     lin = nn.Linear(input_size, dim, bias)
+#     torch.nn.init.xavier_normal_(lin.weight)
+#     return lin
+
+def init_(tensor):
+    dim = tensor.shape[-1]
+    std = 1 / math.sqrt(dim)
+    tensor.uniform_(-std, std)
+    return tensor
+
 class DropPath(nn.Module):
     """Drop paths (Stochastic Depth) per sample  (when applied in main path of residual blocks).
     """
@@ -45,11 +59,51 @@ class DropPath(nn.Module):
         return drop_path(x, self.drop_prob, self.training)
 
 
+# class Attention(nn.Module):
+#     def __init__(
+#         self,
+#         dim:             int,
+#         num_heads:       int = 4,
+#         qkv_bias:        bool = False,
+#         qk_norm:         bool = False,
+#         attn_drop:       float = 0.,
+#         proj_drop:       float = 0.,
+#         norm_layer:      nn.Module = nn.LayerNorm,
+#     ) -> None:
+#         super().__init__()
+#         assert dim % num_heads == 0, 'dim should be divisible by num_heads'
+#         self.num_heads = num_heads
+#         self.head_dim = dim // num_heads
+#         self.scale = self.head_dim ** -0.5
+
+#         self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
+#         self.q_norm = norm_layer(self.head_dim) if qk_norm else nn.Identity()
+#         self.k_norm = norm_layer(self.head_dim) if qk_norm else nn.Identity()
+#         self.attn_drop = nn.Dropout(attn_drop)
+#         self.proj = nn.Linear(dim, dim)
+#         self.proj_drop = nn.Dropout(proj_drop)
+#     def forward(self, x:torch.Tensor) -> torch.Tensor:
+#         B, N, C = x.shape
+#         qkv = self.qkv(x).reshape(B,N,3,self.num_heads, self.head_dim).permute(2, 0, 3, 1, 4)
+#         q, k, v = qkv.unbind(0)
+#         q, k = self.q_norm(q), self.k_norm(k)
+#         q = q * self.scale
+#         attn = q @ k.transpose(-2, -1)
+#         attn = attn.softmax(dim=-1)
+#         attn = self.attn_drop(attn)
+#         x = attn @ v
+#         x = x.transpose(1, 2).reshape(B, N, C)
+#         x = self.proj(x)
+#         x = self.proj_drop(x)
+#         return x, attn
+
+
 class Attention(nn.Module):
     def __init__(
         self,
         dim:             int,
         num_heads:       int = 4,
+        k:               int = 256,
         qkv_bias:        bool = False,
         qk_norm:         bool = False,
         attn_drop:       float = 0.,
@@ -61,27 +115,28 @@ class Attention(nn.Module):
         self.num_heads = num_heads
         self.head_dim = dim // num_heads
         self.scale = self.head_dim ** -0.5
-
-        self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
-        self.q_norm = norm_layer(self.head_dim) if qk_norm else nn.Identity()
-        self.k_norm = norm_layer(self.head_dim) if qk_norm else nn.Identity()
-        self.attn_drop = nn.Dropout(attn_drop)
-        self.proj = nn.Linear(dim, dim)
-        self.proj_drop = nn.Dropout(proj_drop)
+        self.seq_len = PATCH_SIZE #COULD BE WRONG!!!
+        #Q
+        self.q = nn.Linear(dim, self.head_dim * self.num_heads, bias=False)
+        kv_dim = dim * self.num_heads
+        self.to_k = nn.Linear(dim, kv_dim, bias = False)
+        self.proj_k = nn.Parameter(init_(torch.zeros(self.seq_len, k)))
+        
+        self.dropout = nn.Dropout(attn_drop)
+        self.to_out = nn.Linear(self.head_dim * num_heads, dim)
+        
     def forward(self, x:torch.Tensor) -> torch.Tensor:
-        B, N, C = x.shape
-        qkv = self.qkv(x).reshape(B,N,3,self.num_heads, self.head_dim).permute(2, 0, 3, 1, 4)
-        q, k, v = qkv.unbind(0)
-        q, k = self.q_norm(q), self.k_norm(k)
-        q = q * self.scale
-        attn = q @ k.transpose(-2, -1)
-        attn = attn.softmax(dim=-1)
-        attn = self.attn_drop(attn)
-        x = attn @ v
-        x = x.transpose(1, 2).reshape(B, N, C)
-        x = self.proj(x)
-        x = self.proj_drop(x)
-        return x, attn
+        B, N, D, D_H, H, K = *x.shape, self.head_dim, self.num_heads, k
+        
+        kv_len = N
+        queries = self.q(x)
+
+
+
+
+
+
+
 
 class LayerScale(nn.Module):
     def __init__(
@@ -161,10 +216,6 @@ class Embeddings(nn.Module):
 
 
 
-
-
-
-
 class MLP(nn.Module):
     """
     A multi-layer perceptron module.
@@ -173,6 +224,7 @@ class MLP(nn.Module):
         super().__init__()
         self.fc1 = nn.Linear(in_features=HIDDEN_SIZE,out_features=INTERMEDIATE_SIZE)
         # self.fc1= nn.Linear(HIDDEN_SIZE, INTERMEDIATE_SIZE)
+        # self.act = nn.GELU()
         self.act = nn.GELU()
         self.fc2 = nn.Linear(in_features=INTERMEDIATE_SIZE,out_features=HIDDEN_SIZE)
         # self.fc2 = nn.Linear(INTERMEDIATE_SIZE, HIDDEN_SIZE)
@@ -234,8 +286,8 @@ class ViT(nn.Module):
     The ViT model for classification.
     """
 
-    def __init__(self, img_size=[32], patch_size=4, in_chans=3, num_classes=10, embed_dim=768, depth=12,
-                 num_heads=12, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop_rate=0., attn_drop_rate=0.,
+    def __init__(self, img_size=IMAGE_SIZE, patch_size=PATCH_SIZE, in_chans=NUM_CHANNELS, num_classes=NUM_CLASSES, embed_dim=HIDDEN_SIZE, depth=12,
+                 num_heads=NUM_ATTENTION_HEADS, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop_rate=0., attn_drop_rate=0.,
                  drop_path_rate=0., norm_layer=nn.LayerNorm, **kwargs): #TODO: FIX NORM LAYER BEING CALLED OUT EARLIER?
         super().__init__()
         self.img_size = IMAGE_SIZE

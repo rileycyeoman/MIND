@@ -3,6 +3,6 @@
 
 
 std::ifstream ifs("config.json");
-json jf = json::parse(ifs);
 
 
+//TO-DO: Make this in c++ for funsies
