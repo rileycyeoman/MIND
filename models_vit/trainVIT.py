@@ -1,12 +1,7 @@
-import math
 import torch
 from torch import nn
 import torchvision
-import pandas as pd
-import numpy as np
-import json, os, math
-import matplotlib.pyplot as plt
-import numpy as np
+import json, os, time
 from torch.utils.data import DataLoader
 from torch.nn import functional as F
 from torch import optim
@@ -212,7 +207,7 @@ class Trainer:
         """
         # Keep track of the losses and accuracies
         train_losses, test_losses, accuracies = [], [], []
-        
+        t0 = time.time()
         # Train the model
         for i in range(epochs):
             train_loss = self.train_epoch(trainloader)
@@ -221,10 +216,13 @@ class Trainer:
             train_losses.append(train_loss)
             test_losses.append(test_loss)
             accuracies.append(accuracy)
+            t1 = time.time()
             print(f"{TextColors.LIGHT_BLUE}Epoch:{TextColors.ENDC} {i+1}") 
             print(f"{TextColors.BLUE}Train loss:{TextColors.ENDC} {train_loss:.4f}")
             print(f"{TextColors.CYAN}Test loss:{TextColors.ENDC} {test_loss:.4f}") 
             print(f"{TextColors.GREEN}Accuracy:{TextColors.ENDC} {accuracy:.4f}\n")
+            print(f"Time Elapsed from Last Epoch: {t1 - t0}")
+            t0 = t1
             if save_model_every_n_epochs > 0 and (i+1) % save_model_every_n_epochs == 0 and i+1 != epochs:
                 print('\tSave checkpoint at epoch', i+1)
                 save_checkpoint(self.exp_name, self.model, i+1)

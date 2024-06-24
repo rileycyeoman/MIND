@@ -17,10 +17,10 @@
     },
     "PARAMETERS": {
       "patch_size": 16,
-      "hidden_size": 768,
+      "hidden_size": 384,
       "num_hidden_layers": 12,
-      "num_attention_heads": 12,
-      "intermediate_size": 3072,
+      "num_attention_heads": 6,
+      "intermediate_size": 1536,
       "hidden_dropout_prob": 0.0,
       "attention_probs_dropout_prob": 0.0,
       "initializer_range": 0.02,
@@ -28,10 +28,11 @@
       "num_classes": 10,
       "num_channels": 3,
       "num_frames" : 200,
+      "seq_len" : 197 ,
       "qkv_bias": true,
       "exp_name": "vit_with-25-epochs",
       "batch_size": 32,
-      "epochs": 5,
+      "epochs": 25,
       "lr": 0.001,
       "save_model_every": 0
     }

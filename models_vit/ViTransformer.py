@@ -5,8 +5,8 @@ from torch import nn
 import math
 import torch.nn.functional as F
 import json
-from linformer import Linformer
-
+import utils
+from performer_pytorch import SelfAttention as PerformerAttention
 
 
 with open('config.json', 'r') as json_file:
@@ -25,6 +25,7 @@ IMAGE_SIZE = int(config['PARAMETERS']['image_size'])
 NUM_CLASSES = int(config['PARAMETERS']['num_classes'])
 NUM_CHANNELS = int(config['PARAMETERS']['num_channels'])
 QKV_BIAS = bool(config['PARAMETERS']['qkv_bias'])
+SEQ_LEN = int(config['PARAMETERS']['seq_len'])
 
 def drop_path(x, drop_prob: float = 0., training: bool = False):
     # return x
@@ -59,11 +60,11 @@ class DropPath(nn.Module):
         return drop_path(x, self.drop_prob, self.training)
 
 
-# class Attention(nn.Module):
+# class Attention(nn.Module): #Basic attention
 #     def __init__(
 #         self,
 #         dim:             int,
-#         num_heads:       int = 4,
+#         num_heads:       int = NUM_ATTENTION_HEADS,
 #         qkv_bias:        bool = False,
 #         qk_norm:         bool = False,
 #         attn_drop:       float = 0.,
@@ -98,16 +99,16 @@ class DropPath(nn.Module):
 #         return x, attn
 
 
-class Attention(nn.Module):
+class Attention(nn.Module): #Linformer transformer
     def __init__(
         self,
         dim:             int,
-        num_heads:       int = 4,
-        k:               int = 256,
+        num_heads:       int = NUM_ATTENTION_HEADS,
         qkv_bias:        bool = False,
         qk_norm:         bool = False,
         attn_drop:       float = 0.,
         proj_drop:       float = 0.,
+        seq_len:         int = SEQ_LEN,
         norm_layer:      nn.Module = nn.LayerNorm,
     ) -> None:
         super().__init__()
@@ -115,21 +116,37 @@ class Attention(nn.Module):
         self.num_heads = num_heads
         self.head_dim = dim // num_heads
         self.scale = self.head_dim ** -0.5
-        self.seq_len = PATCH_SIZE #COULD BE WRONG!!!
-        #Q
-        self.q = nn.Linear(dim, self.head_dim * self.num_heads, bias=False)
-        kv_dim = dim * self.num_heads
-        self.to_k = nn.Linear(dim, kv_dim, bias = False)
-        self.proj_k = nn.Parameter(init_(torch.zeros(self.seq_len, k)))
-        
-        self.dropout = nn.Dropout(attn_drop)
-        self.to_out = nn.Linear(self.head_dim * num_heads, dim)
-        
+
+        self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
+        self.q_norm = norm_layer(self.head_dim) if qk_norm else nn.Identity()
+        self.k_norm = norm_layer(self.head_dim) if qk_norm else nn.Identity()
+        self.attn_drop = nn.Dropout(attn_drop)
+        self.proj = nn.Linear(dim, dim)
+        self.proj_drop = nn.Dropout(proj_drop)
+
+        # Linformer configuration
+        self.linformer_attn = utils.LinformerSelfAttention(dim=dim, seq_len=seq_len, heads=num_heads, dim_head=self.head_dim)
+
     def forward(self, x:torch.Tensor) -> torch.Tensor:
-        B, N, D, D_H, H, K = *x.shape, self.head_dim, self.num_heads, k
+        B, N, C = x.shape
+        qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, self.head_dim).permute(2, 0, 3, 1, 4)
+        q, k, v = qkv.unbind(0)
+        q, k = self.q_norm(q), self.k_norm(k)
+        q = q * self.scale
+
+        # Use Linformer attention
+        attn_output = self.linformer_attn(x)
         
-        kv_len = N
-        queries = self.q(x)
+        # Ensure the attn_output is consistent with the original attention output
+        attn = torch.einsum('bhqd,bhkd->bhqk', q, k)
+        attn = attn.softmax(dim=-1)
+        attn = self.attn_drop(attn)
+        x = torch.einsum('bhqk,bhkd->bhqd', attn, v)
+
+        x = x.transpose(1, 2).reshape(B, N, C)
+        x = self.proj(x)
+        x = self.proj_drop(x)
+        return x, attn_output
 
 
 
