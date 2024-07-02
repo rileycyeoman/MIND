@@ -2,7 +2,9 @@ import math
 import torch
 from torch import nn
 import torch.nn.functional as F
-
+from torch.utils.data import DataLoader, Subset
+import torchvision
+from torchvision import transforms
 # Borrowing from https://github.com/lucidrains/linformer/blob/master/linformer/
 
 def default(val, default_val):
@@ -62,7 +64,15 @@ class FeedForward(nn.Module):
         return x
 
 class LinformerSelfAttention(nn.Module):
-    def __init__(self, dim, seq_len, k = 256, heads = 8, dim_head = None, one_kv_head = False, share_kv = False, dropout = 0.):
+    def __init__(self, 
+                 dim: int, 
+                 seq_len: int, 
+                 k : int = 256,
+                 heads : int = 8, 
+                 dim_head : int = None, 
+                 one_kv_head : bool = False, 
+                 share_kv : bool = False, 
+                 dropout : float = 0.):
         super().__init__()
         assert (dim % heads) == 0, 'dimension must be divisible by the number of heads'
 
@@ -131,3 +141,95 @@ class LinformerSelfAttention(nn.Module):
         # split heads
         out = out.transpose(1, 2).reshape(b, n, -1)
         return self.to_out(out)
+
+
+
+###### Data Handlers ######
+class DataHandler:
+    def __init__(self,
+                root_dir : str = './data',
+                dataset_name : str = 'CIFAR10',
+                transform = None,
+                download : bool = True,
+                train : bool = True,
+                batch_size : int = 32, 
+                num_workers : int = 4, 
+                train_sample_size : int = None, 
+                test_sample_size  : int = None, 
+                image_size : int = 32,
+                )-> None:
+        self.root_dir = root_dir
+        self.dataset_name = dataset_name
+        self.root = root_dir
+        self.train = train
+        self.download = download
+        self.batch_size = batch_size
+        self.num_workers = num_workers
+        self.train_sample_size = train_sample_size
+        self.test_sample_size = test_sample_size
+        self.image_size = image_size
+        self.train_transform = self.get_train_transform()
+        self.test_transform = self.get_test_transform()
+        
+    def get_train_transform(self):
+        additional_transforms = [
+            transforms.RandomRotation(10),
+            transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.1),
+            transforms.RandomErasing(p=0.9, scale=(0.02, 0.2)),
+        ]
+
+        return transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Resize((self.image_size, self.image_size), antialias=True),
+            transforms.RandomApply(additional_transforms, p=0.5),
+            transforms.RandomHorizontalFlip(p=0.5),
+            transforms.RandomResizedCrop((self.image_size, self.image_size), scale=(0.8, 1.0), ratio=(0.75, 1.3333333333333333), interpolation=2, antialias=True),
+            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+        ])
+
+    def get_test_transform(self):
+        return transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Resize((self.image_size, self.image_size), antialias=True),
+            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+        ])
+
+    def get_dataset(self, train=True):
+        if self.dataset_name == 'CIFAR10':
+            return torchvision.datasets.CIFAR10(root=self.root, train=train, download=self.download, transform=self.train_transform if train else self.test_transform)
+        # Add more datasets as needed
+        elif self.dataset_name == 'FER2013':
+            train_input = '/data/FER2013/train' 
+            test_input = '/data/FER2013/test'  
+            if train:
+                return torchvision.datasets.ImageFolder(root=train_input, transform=self.train_transform)
+            else:
+                return torchvision.datasets.ImageFolder(root=test_input, transform=self.test_transform)
+        
+        else:
+            raise ValueError(f"Unsupported dataset: {self.dataset_name}")
+
+    def get_data_loader(self, dataset, train=True):
+        if train and self.train_sample_size is not None:
+            indices = torch.randperm(len(dataset))[:self.train_sample_size]
+            dataset = Subset(dataset, indices)
+        elif not train and self.test_sample_size is not None:
+            indices = torch.randperm(len(dataset))[:self.test_sample_size]
+            dataset = Subset(dataset, indices)
+
+        return DataLoader(dataset, 
+                          batch_size=self.batch_size, 
+                          shuffle=train, 
+                          num_workers=self.num_workers, 
+                          drop_last=not train, 
+                          pin_memory=True)
+
+    def prepare_data(self):
+        trainset = self.get_dataset(train=True)
+        testset = self.get_dataset(train=False)
+
+        trainloader = self.get_data_loader(trainset, train=True)
+        testloader = self.get_data_loader(testset, train=False)
+
+        classes = trainset.classes
+        return trainloader, testloader, classes

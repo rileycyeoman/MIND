@@ -1,5 +1,6 @@
 import torch
 from torch import nn
+import torch.utils
 import torchvision
 import json, os, time
 from torch.utils.data import DataLoader
@@ -7,7 +8,7 @@ from torch.nn import functional as F
 from torch import optim
 import torchvision.transforms as transforms
 from ViTransformer import ViT
-
+from utils import DataHandler
 with open('config.json', 'r') as json_file:
     config = json.load(json_file)
     
@@ -54,68 +55,6 @@ class TextColors:
     CROSSED = "\033[9m"
     ENDC = "\033[0m"
 
-def prepare_data(batch_size=4, num_workers=2, train_sample_size=None, test_sample_size=None):
-    # Define additional transforms for performance improvement
-    additional_transforms = [
-        transforms.RandomRotation(10),
-        transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.1),
-        transforms.RandomErasing(p=0.9, scale=(0.02, 0.2)),
-    ]
-
-    # Update the train_transform with additional transforms
-    train_transform = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Resize((IMAGE_SIZE, IMAGE_SIZE), antialias=True),
-        transforms.RandomApply(additional_transforms, p=0.5),
-        transforms.RandomHorizontalFlip(p=0.5),
-        transforms.RandomResizedCrop((IMAGE_SIZE, IMAGE_SIZE), scale=(0.8, 1.0), ratio=(0.75, 1.3333333333333333), interpolation=2, antialias=True),
-        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
-    ])
-
-    # Update the test_transform with additional transforms
-    test_transform = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Resize((IMAGE_SIZE, IMAGE_SIZE), antialias=True),
-        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
-    ])
-    #use these for FER2013
-    # trainset = torchvision.datasets.ImageFolder(root=TRAIN_INPUT, transform=train_transform)
-    # testset = torchvision.datasets.ImageFolder(root=TEST_INPUT, transform=test_transform)
-    
-    # use these for CIFAR10
-    trainset = torchvision.datasets.CIFAR10(root='./data', train=True,
-                                            download=True, transform=train_transform)
-    testset = torchvision.datasets.CIFAR10(root='./data', train=False,
-                                        download=True, transform=test_transform)
-    
-    # trainset = torchvision.datasets.Imagenette(root='./data', train=True,
-    #                                         download=True, transform=train_transform, size = "320px")
-    # testset = torchvision.datasets.Imagenette(root='./data', train=False,
-    #                                     download=True, transform=test_transform, size = "320px")
-    
-    if train_sample_size is not None:
-        # Randomly sample a subset of the training set
-        # trainset = torch.utils.data.random_split(trainset, [train_sample_size, len(trainset) - train_sample_size])[0]
-        indices = torch.randperm(len(trainset))[:train_sample_size]
-        trainset = torch.utils.data.Subset(trainset, indices)
-
-    if test_sample_size is not None:
-        # Randomly sample a subset of the test set
-        # testset = torch.utils.data.random_split(testset, [test_sample_size, len(testset) - test_sample_size])[0]
-        indices = torch.randperm(len(testset))[:test_sample_size]
-        testset = torch.utils.data.Subset(testset, indices)
-
-    # Create data loaders
-    trainloader = torch.utils.data.DataLoader(trainset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
-    testloader = torch.utils.data.DataLoader(testset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
-
-    classes = trainset.classes
-    return trainloader, testloader, classes
-
-            
-        
-        
-        
         
 def save_experiment(experiment_name, config, model, train_losses, test_losses, accuracies, base_dir="experiments"):
     outdir = os.path.join(base_dir, experiment_name)
@@ -280,8 +219,9 @@ class Trainer:
 def main():
     # Training parameters
     save_model_every_n_epochs = SAVE_MODEL_EVERY
-    # Load the FER2013 dataset
-    trainloader, testloader, _ = prepare_data(batch_size=BATCH_SIZE)
+    # Load the dataset
+    data_loader = DataHandler(batch_size=BATCH_SIZE, num_workers=4, train_sample_size= None, test_sample_size = None)
+    trainloader, testloader, classes = data_loader.prepare_data()
     # Create the model, optimizer, loss function and trainer
     model = ViT(img_size = IMAGE_SIZE,
                 patch_size= PATCH_SIZE,

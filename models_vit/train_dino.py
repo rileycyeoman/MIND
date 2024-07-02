@@ -169,7 +169,23 @@ def load_experiment(experiment_name, checkpoint_name="model_final.pt", base_dir=
 
 
 
-        
+class DINOloss(nn.Module):
+    def __init__(self,
+                 out_dim: int,
+                 ncrops: int,
+                 warmup_teacher_temp: float,
+                 teacher_temp: float,
+                 warmup_teacher_temp_epochs: int,
+                 nepochs: int,
+                 student_temp: float = 0.1,
+                 center_momentum = 0.9
+                 ) -> None:
+        super.__init__()
+        self.student_temp = student_temp
+        self.center_momentum = center_momentum
+        self.ncrops = ncrops
+        #add a tensor to the module that's non-learnable 
+        self.register_buffer()
         
 def dino_loss(student_output, teacher_output, student_temp=0.1, teacher_temp=0.04, center=0.0):
     """
