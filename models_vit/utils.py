@@ -154,7 +154,7 @@ class LinformerSelfAttention(nn.Module):
 class DataHandler:
     def __init__(self,
                 root_dir : str = './data',
-                dataset_name : str = 'CIFAR10',
+                dataset_name : str = 'NHF',
                 transform = None,
                 download : bool = True,
                 train : bool = True,
@@ -163,7 +163,7 @@ class DataHandler:
                 train_sample_size : int = None, 
                 test_sample_size  : int = None, 
                 image_size : int = 32,
-                num_channels : int = 1,
+                num_channels : int = 3,
                 )-> None:
         self.root_dir = root_dir
         self.dataset_name = dataset_name
@@ -216,23 +216,17 @@ class DataHandler:
                 return torchvision.datasets.ImageFolder(root=train_input, transform=self.train_transform)
             else:
                 return torchvision.datasets.ImageFolder(root=test_input, transform=self.test_transform)
+        
+        
+        
         elif self.dataset_name == 'NHF':
             img_root = "/home/yeoman/research/NHF"
-            # img_set = torchvision.datasets.ImageFolder(root = img_root,spl, transform = self.train_transform)
-            # self.classes = img_set.classes
-            # n = len(img_set)
-            # n_test = int(0.2 * n) 
-            
-            if train:
-                img_set = torchvision.datasets.ImageFolder(root = img_root, transform = self.train_transform)
-                n = len(img_set)
-                n_test = int(0.2 * n) 
-                return torch.utils.data.Subset(img_set, range(n_test, n))  # take the rest
-            else:
-                img_set = torchvision.datasets.ImageFolder(root = img_root, transform = self.test_transform)
-                n = len(img_set)
-                n_test = int(0.2 * n) 
-                return torch.utils.data.Subset(img_set, range(n_test))  # take first 10%
+            dataset = torchvision.datasets.ImageFolder(
+                root=img_root,
+                transform=self.train_transform if train else self.test_transform
+            )
+            self.classes = dataset.classes
+            return dataset
         
         else:
             raise ValueError(f"Unsupported dataset: {self.dataset_name}")
@@ -259,5 +253,5 @@ class DataHandler:
         trainloader = self.get_data_loader(trainset, train=True)
         testloader = self.get_data_loader(testset, train=False)
 
-        classes = CLASSES
+        classes = self.classes
         return trainloader, testloader, classes

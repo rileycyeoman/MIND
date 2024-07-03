@@ -309,6 +309,7 @@ class ViT(nn.Module):
         self.img_size = IMAGE_SIZE
         self.hidden_size = HIDDEN_SIZE
         self.num_classes = NUM_CLASSES
+        self.classifier = nn.Linear(HIDDEN_SIZE, NUM_CLASSES)
         # Create the embedding module
         self.patch_embed = PatchEmbeddings()
         num_patches = self.patch_embed.num_patches
@@ -383,6 +384,8 @@ class ViT(nn.Module):
             x = blk(x)
         x = self.norm(x)
         return x[:, 0]
+        
+        
 
     def get_last_selfattention(self, x):
         x = self.prepare_tokens(x)

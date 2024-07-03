@@ -125,16 +125,16 @@ assert IMAGE_SIZE % PATCH_SIZE == 0, "Image size is not divisible by patch size"
 
 
 
-
 class Trainer:
     """
     The simple trainer.
     """
 
-    def __init__(self, model, optimizer, scheduler, loss_fn, exp_name, device):
+    def __init__(self, model, optimizer, scheduler, classifier, loss_fn, exp_name, device):
         self.model = model.to(device)
         self.optimizer = optimizer
         self.scheduler = scheduler
+        self.classifier = classifier.to(device)
         self.loss_fn = loss_fn
         self.exp_name = exp_name
         self.device = device
@@ -174,6 +174,7 @@ class Trainer:
         """
         # scaler = torch.cuda.amp.GradScaler()
         self.model.train()
+        self.classifier.train()
         total_loss = 0
         for batch in trainloader:
             # Move the batch to the device
@@ -193,6 +194,7 @@ class Trainer:
     @torch.no_grad()
     def evaluate(self, testloader):
         self.model.eval()
+        self.classifier.eval()
         total_loss = 0
         correct = 0
         with torch.no_grad():
@@ -202,7 +204,8 @@ class Trainer:
                 images, labels = batch
 
                 # Get predictions
-                logits  = self.model(images)
+                features  = self.model(images)
+                logits = self.classifier(features)
 
                 # Calculate the loss
                 loss = self.loss_fn(logits, labels)
@@ -231,11 +234,10 @@ def main():
     optimizer = optim.AdamW(model.parameters(), lr=LR, weight_decay=1e-2)
     # optimizer = optim.SGD(model.parameters(), lr = LR, weight_decay = 1e-2, momentum = 0.9)
     scheduler = optim.lr_scheduler.ExponentialLR(optimizer=optimizer, gamma=0.9)
-    # linear_classifier = LinearClassifier()
-    # linear_classifier.train()
+    classifier = nn.Linear(HIDDEN_SIZE, NUM_CLASSES)
     loss_fn = nn.CrossEntropyLoss()
     
-    trainer = Trainer(model, optimizer, scheduler, loss_fn, EXP_NAME, device=device)
+    trainer = Trainer(model, optimizer, scheduler, classifier, loss_fn, EXP_NAME, device=device)
     print(f"{TextColors.BOLD}==============Training MIND=============={TextColors.ENDC}")
     trainer.train(trainloader, testloader, EPOCHS, save_model_every_n_epochs=save_model_every_n_epochs)
     print(f"{TextColors.BOLD}==============Training done=============={TextColors.ENDC}")
