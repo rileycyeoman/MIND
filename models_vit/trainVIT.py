@@ -27,7 +27,7 @@ BATCH_SIZE = int(config['PARAMETERS']['batch_size'])
 EPOCHS = int(config['PARAMETERS']['epochs'])
 LR = float(config['PARAMETERS']['lr'])
 SAVE_MODEL_EVERY = int(config['PARAMETERS']['save_model_every'])
-
+DATASET =  config['PARAMETERS']['dataset_name']
 # Make the output satisfying
 class TextColors:
     BLACK = "\033[0;30m"
@@ -183,7 +183,8 @@ class Trainer:
             # Zero the gradients
             self.optimizer.zero_grad()
             # Calculate the loss
-            loss = self.loss_fn(self.model(images), labels)
+            logits = self.classifier(self.model(images))
+            loss = self.loss_fn(logits, labels)
             # Backpropagate the loss
             loss.backward()
             # Update the model's parameters
@@ -223,7 +224,7 @@ def main():
     # Training parameters
     save_model_every_n_epochs = SAVE_MODEL_EVERY
     # Load the dataset
-    data_loader = DataHandler(batch_size=BATCH_SIZE, dataset_name= 'NHF' ,num_workers=4, train_sample_size= None, test_sample_size = None)
+    data_loader = DataHandler(batch_size=BATCH_SIZE, dataset_name= DATASET ,num_workers=4, train_sample_size= None, test_sample_size = None)
     trainloader, testloader, classes = data_loader.prepare_data()
     # Create the model, optimizer, loss function and trainer
     model = ViT(img_size = IMAGE_SIZE,
@@ -231,10 +232,10 @@ def main():
                 in_chans= NUM_CHANNELS,
                 num_classes= NUM_CLASSES,
                 embed_dim= HIDDEN_SIZE)
-    optimizer = optim.AdamW(model.parameters(), lr=LR, weight_decay=1e-2)
+    classifier = nn.Linear(HIDDEN_SIZE, NUM_CLASSES)
+    optimizer = optim.AdamW(list(model.parameters()) + list(classifier.parameters()), lr=LR, weight_decay=1e-2)
     # optimizer = optim.SGD(model.parameters(), lr = LR, weight_decay = 1e-2, momentum = 0.9)
     scheduler = optim.lr_scheduler.ExponentialLR(optimizer=optimizer, gamma=0.9)
-    classifier = nn.Linear(HIDDEN_SIZE, NUM_CLASSES)
     loss_fn = nn.CrossEntropyLoss()
     
     trainer = Trainer(model, optimizer, scheduler, classifier, loss_fn, EXP_NAME, device=device)

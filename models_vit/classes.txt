@@ -1,0 +1,22 @@
+[
+        "anger",
+        "neutrality",
+        "fear",
+        "sadness",
+        "surprise",
+        "disgust",
+        "happiness",
+        "contempt"
+      ]
+
+
+
+[
+        "anger",
+        "neutral",
+        "fear",
+        "sad",
+        "surprise",
+        "disgust",
+        "happy"
+      ]

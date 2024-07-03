@@ -207,15 +207,15 @@ class DataHandler:
 
     def get_dataset(self, train=True):
         if self.dataset_name == 'CIFAR10':
-            return torchvision.datasets.CIFAR10(root=self.root, train=train, download=self.download, transform=self.train_transform if train else self.test_transform)
+            dataset = torchvision.datasets.CIFAR10(root=self.root, train=train, download=self.download, transform=self.train_transform if train else self.test_transform)
         # Add more datasets as needed
         elif self.dataset_name == 'FER2013':
             train_input = "/home/yeoman/research/train" 
             test_input = "/home/yeoman/research/test"  
             if train:
-                return torchvision.datasets.ImageFolder(root=train_input, transform=self.train_transform)
+                dataset = torchvision.datasets.ImageFolder(root=train_input, transform=self.train_transform)
             else:
-                return torchvision.datasets.ImageFolder(root=test_input, transform=self.test_transform)
+                dataset = torchvision.datasets.ImageFolder(root=test_input, transform=self.test_transform)
         
         
         
@@ -226,11 +226,11 @@ class DataHandler:
                 transform=self.train_transform if train else self.test_transform
             )
             self.classes = dataset.classes
-            return dataset
+            # return dataset
         
         else:
             raise ValueError(f"Unsupported dataset: {self.dataset_name}")
-
+        return dataset
     def get_data_loader(self, dataset, train=True):
         if train and self.train_sample_size is not None:
             indices = torch.randperm(len(dataset))[:self.train_sample_size]
@@ -253,5 +253,5 @@ class DataHandler:
         trainloader = self.get_data_loader(trainset, train=True)
         testloader = self.get_data_loader(testset, train=False)
 
-        classes = self.classes
+        classes = trainset.classes
         return trainloader, testloader, classes
