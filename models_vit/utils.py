@@ -4,7 +4,13 @@ from torch import nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, Subset
 import torchvision
+import json
 from torchvision import transforms
+
+with open('config.json', 'r') as json_file:
+    config = json.load(json_file)
+CLASSES = config['DATA']['CLASSES']
+
 # Borrowing from https://github.com/lucidrains/linformer/blob/master/linformer/
 
 def default(val, default_val):
@@ -144,7 +150,7 @@ class LinformerSelfAttention(nn.Module):
 
 
 
-###### Data Handlers ######
+###### Data Handling ######
 class DataHandler:
     def __init__(self,
                 root_dir : str = './data',
@@ -157,6 +163,7 @@ class DataHandler:
                 train_sample_size : int = None, 
                 test_sample_size  : int = None, 
                 image_size : int = 32,
+                num_channels : int = 1,
                 )-> None:
         self.root_dir = root_dir
         self.dataset_name = dataset_name
@@ -170,7 +177,7 @@ class DataHandler:
         self.image_size = image_size
         self.train_transform = self.get_train_transform()
         self.test_transform = self.get_test_transform()
-        
+        self.num_channels = num_channels
     def get_train_transform(self):
         additional_transforms = [
             transforms.RandomRotation(10),
@@ -179,18 +186,22 @@ class DataHandler:
         ]
 
         return transforms.Compose([
+            # transforms.Grayscale(num_output_channels= 1),
             transforms.ToTensor(),
             transforms.Resize((self.image_size, self.image_size), antialias=True),
             transforms.RandomApply(additional_transforms, p=0.5),
             transforms.RandomHorizontalFlip(p=0.5),
             transforms.RandomResizedCrop((self.image_size, self.image_size), scale=(0.8, 1.0), ratio=(0.75, 1.3333333333333333), interpolation=2, antialias=True),
             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+            # transforms.Normalize((0.5,) * 1, (0.5,) * 1)
         ])
 
     def get_test_transform(self):
         return transforms.Compose([
+            # transforms.Grayscale(num_output_channels= 1),
             transforms.ToTensor(),
             transforms.Resize((self.image_size, self.image_size), antialias=True),
+            # transforms.Normalize((0.5,) * 1, (0.5,) * 1)
             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
         ])
 
@@ -199,12 +210,29 @@ class DataHandler:
             return torchvision.datasets.CIFAR10(root=self.root, train=train, download=self.download, transform=self.train_transform if train else self.test_transform)
         # Add more datasets as needed
         elif self.dataset_name == 'FER2013':
-            train_input = '/data/FER2013/train' 
-            test_input = '/data/FER2013/test'  
+            train_input = "/home/yeoman/research/train" 
+            test_input = "/home/yeoman/research/test"  
             if train:
                 return torchvision.datasets.ImageFolder(root=train_input, transform=self.train_transform)
             else:
                 return torchvision.datasets.ImageFolder(root=test_input, transform=self.test_transform)
+        elif self.dataset_name == 'NHF':
+            img_root = "/home/yeoman/research/NHF"
+            # img_set = torchvision.datasets.ImageFolder(root = img_root,spl, transform = self.train_transform)
+            # self.classes = img_set.classes
+            # n = len(img_set)
+            # n_test = int(0.2 * n) 
+            
+            if train:
+                img_set = torchvision.datasets.ImageFolder(root = img_root, transform = self.train_transform)
+                n = len(img_set)
+                n_test = int(0.2 * n) 
+                return torch.utils.data.Subset(img_set, range(n_test, n))  # take the rest
+            else:
+                img_set = torchvision.datasets.ImageFolder(root = img_root, transform = self.test_transform)
+                n = len(img_set)
+                n_test = int(0.2 * n) 
+                return torch.utils.data.Subset(img_set, range(n_test))  # take first 10%
         
         else:
             raise ValueError(f"Unsupported dataset: {self.dataset_name}")
@@ -231,5 +259,5 @@ class DataHandler:
         trainloader = self.get_data_loader(trainset, train=True)
         testloader = self.get_data_loader(testset, train=False)
 
-        classes = trainset.classes
+        classes = CLASSES
         return trainloader, testloader, classes

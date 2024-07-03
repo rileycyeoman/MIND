@@ -11,8 +11,7 @@ from performer_pytorch import SelfAttention as PerformerAttention
 
 with open('config.json', 'r') as json_file:
     config = json.load(json_file)
-# config = configparser.ConfigParser()
-# config.read('config.ini')
+
 PATCH_SIZE = int(config['PARAMETERS']['patch_size'])
 HIDDEN_SIZE = int(config['PARAMETERS']['hidden_size'])
 NUM_HIDDEN_LAYERS = int(config['PARAMETERS']['num_hidden_layers'])
@@ -179,7 +178,7 @@ class PatchEmbeddings(nn.Module):
         self,  
         img_size: int = 32, 
         patch_size:int = 4,
-        in_channels:int = 3) -> None: 
+        in_channels:int = 1) -> None: 
         super().__init__()
         self.img_size = IMAGE_SIZE #(h,w)
         self.patch_size = PATCH_SIZE # 16

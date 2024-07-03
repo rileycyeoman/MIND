@@ -3,16 +3,14 @@
       "TRAIN_INPUT": "/home/yeoman/research/train",
       "TEST_INPUT": "/home/yeoman/research/test",
       "CLASSES": [
-        "tench",
-        "English springer",
-        "cassette player",
-        "chain saw",
-        "church",
-        "French horn",
-        "garbage truck",
-        "gas pump",
-        "golf ball",
-        "parachute"
+        "anger",
+        "neutrality",
+        "fear",
+        "sadness",
+        "surprise",
+        "disgust",
+        "happiness",
+        "contempt"
       ]
     },
     "PARAMETERS": {
@@ -25,7 +23,7 @@
       "attention_probs_dropout_prob": 0.0,
       "initializer_range": 0.02,
       "image_size": 224,
-      "num_classes": 10,
+      "num_classes": 7,
       "num_channels": 3,
       "num_frames" : 200,
       "seq_len" : 197 ,

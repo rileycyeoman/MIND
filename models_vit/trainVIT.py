@@ -220,7 +220,7 @@ def main():
     # Training parameters
     save_model_every_n_epochs = SAVE_MODEL_EVERY
     # Load the dataset
-    data_loader = DataHandler(batch_size=BATCH_SIZE, num_workers=4, train_sample_size= None, test_sample_size = None)
+    data_loader = DataHandler(batch_size=BATCH_SIZE, dataset_name= 'NHF' ,num_workers=4, train_sample_size= None, test_sample_size = None)
     trainloader, testloader, classes = data_loader.prepare_data()
     # Create the model, optimizer, loss function and trainer
     model = ViT(img_size = IMAGE_SIZE,
