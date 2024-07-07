@@ -1,12 +1,9 @@
 import torch
 from torch import nn
 import torch.utils
-import torchvision
 import json, os, time
-from torch.utils.data import DataLoader
 from torch.nn import functional as F
 from torch import optim
-import torchvision.transforms as transforms
 from ViTransformer import ViT
 from utils import DataHandler
 with open('config.json', 'r') as json_file:
@@ -110,8 +107,7 @@ def load_experiment(experiment_name, checkpoint_name="model_final.pt", base_dir=
         
         
         
-        
-        
+    
         
 
 
@@ -130,10 +126,9 @@ class Trainer:
     The simple trainer.
     """
 
-    def __init__(self, model, optimizer, scheduler, classifier, loss_fn, exp_name, device):
+    def __init__(self, model, optimizer, classifier, loss_fn, exp_name, device):
         self.model = model.to(device)
         self.optimizer = optimizer
-        self.scheduler = scheduler
         self.classifier = classifier.to(device)
         self.loss_fn = loss_fn
         self.exp_name = exp_name
@@ -150,7 +145,6 @@ class Trainer:
         # Train the model
         for i in range(epochs):
             train_loss = self.train_epoch(trainloader)
-            self.scheduler.step()
             accuracy, test_loss = self.evaluate(testloader)
             train_losses.append(train_loss)
             test_losses.append(test_loss)
@@ -225,7 +219,7 @@ def main():
     save_model_every_n_epochs = SAVE_MODEL_EVERY
     # Load the dataset
     data_loader = DataHandler(batch_size=BATCH_SIZE, dataset_name= DATASET ,num_workers=4, train_sample_size= None, test_sample_size = None)
-    trainloader, testloader, classes = data_loader.prepare_data()
+    trainloader, testloader, _ = data_loader.prepare_data()
     # Create the model, optimizer, loss function and trainer
     model = ViT(img_size = IMAGE_SIZE,
                 patch_size= PATCH_SIZE,
@@ -235,10 +229,9 @@ def main():
     classifier = nn.Linear(HIDDEN_SIZE, NUM_CLASSES)
     optimizer = optim.AdamW(list(model.parameters()) + list(classifier.parameters()), lr=LR, weight_decay=1e-2)
     # optimizer = optim.SGD(model.parameters(), lr = LR, weight_decay = 1e-2, momentum = 0.9)
-    scheduler = optim.lr_scheduler.ExponentialLR(optimizer=optimizer, gamma=0.9)
     loss_fn = nn.CrossEntropyLoss()
     
-    trainer = Trainer(model, optimizer, scheduler, classifier, loss_fn, EXP_NAME, device=device)
+    trainer = Trainer(model, optimizer, classifier, loss_fn, EXP_NAME, device=device)
     print(f"{TextColors.BOLD}==============Training MIND=============={TextColors.ENDC}")
     trainer.train(trainloader, testloader, EPOCHS, save_model_every_n_epochs=save_model_every_n_epochs)
     print(f"{TextColors.BOLD}==============Training done=============={TextColors.ENDC}")

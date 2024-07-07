@@ -6,7 +6,6 @@ from torch.utils.data import DataLoader, Subset
 import torchvision
 import json
 from torchvision import transforms
-
 with open('config.json', 'r') as json_file:
     config = json.load(json_file)
 CLASSES = config['DATA']['CLASSES']
@@ -150,7 +149,29 @@ class LinformerSelfAttention(nn.Module):
 
 
 
+
+
+
+
+
 ###### Data Handling ######
+
+
+class TransformedSubset(torch.utils.data.Dataset):
+    def __init__(self, subset, transform=None):
+        self.subset = subset
+        self.transform = transform
+        self.classes = subset.dataset.classes
+    def __getitem__(self, index):
+        x, y = self.subset[index]
+        if self.transform:
+            x = self.transform(x)
+        return x, y
+
+    def __len__(self):
+        return len(self.subset)
+
+
 class DataHandler:
     def __init__(self,
                 root_dir : str = './data',
@@ -195,7 +216,6 @@ class DataHandler:
             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
             # transforms.Normalize((0.5,) * 1, (0.5,) * 1)
         ])
-
     def get_test_transform(self):
         return transforms.Compose([
             # transforms.Grayscale(num_output_channels= 1),
@@ -204,6 +224,9 @@ class DataHandler:
             # transforms.Normalize((0.5,) * 1, (0.5,) * 1)
             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
         ])
+
+
+
 
     def get_dataset(self, train=True):
         if self.dataset_name == 'CIFAR10':
@@ -220,13 +243,14 @@ class DataHandler:
         
         
         elif self.dataset_name == 'NHF':
-            img_root = "/home/yeoman/research/NHF"
-            dataset = torchvision.datasets.ImageFolder(
-                root=img_root,
-                transform=self.train_transform if train else self.test_transform
-            )
+            
+            train_input = '/home/yeoman/MIND/models_vit/data/train'
+            test_input = '/home/yeoman/MIND/models_vit/data/test'
+            if train:
+                dataset = torchvision.datasets.ImageFolder(root=train_input, transform=self.train_transform)
+            else:
+                dataset = torchvision.datasets.ImageFolder(root=test_input, transform=self.test_transform)
             self.classes = dataset.classes
-            # return dataset
         
         else:
             raise ValueError(f"Unsupported dataset: {self.dataset_name}")
@@ -253,5 +277,5 @@ class DataHandler:
         trainloader = self.get_data_loader(trainset, train=True)
         testloader = self.get_data_loader(testset, train=False)
 
-        classes = trainset.classes
+        classes = trainset.dataset.classes if isinstance(trainset, Subset) else trainset.classes
         return trainloader, testloader, classes
