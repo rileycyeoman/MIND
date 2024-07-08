@@ -115,7 +115,7 @@ def load_experiment(experiment_name, checkpoint_name="model_final.pt", base_dir=
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 print(f"Using the {TextColors.PURPLE}{torch.cuda.get_device_name(0)}{TextColors.ENDC} for training.")
 # These are not hard constraints, but are used to prevent misconfigurations
-assert HIDDEN_SIZE % NUM_ATTENTION_HEADS == 0, "The size of "
+assert HIDDEN_SIZE % NUM_ATTENTION_HEADS == 0, "The size of hidden layer is not divisible by the number of attention heads"
 assert INTERMEDIATE_SIZE == 4 * HIDDEN_SIZE, "The intermediate size is not 4 times the embedding/hidden size."
 assert IMAGE_SIZE % PATCH_SIZE == 0, "Image size is not divisible by patch size"
 
@@ -144,16 +144,16 @@ class Trainer:
         t0 = time.time()
         # Train the model
         for i in range(epochs):
-            train_loss = self.train_epoch(trainloader)
-            accuracy, test_loss = self.evaluate(testloader)
+            train_loss, train_accuracy = self.train_epoch(trainloader)
+            test_accuracy, test_loss = self.evaluate(testloader)
             train_losses.append(train_loss)
             test_losses.append(test_loss)
-            accuracies.append(accuracy)
+            accuracies.append(train_accuracy)
             t1 = time.time()
             print(f"{TextColors.LIGHT_BLUE}Epoch:{TextColors.ENDC} {i+1}") 
             print(f"{TextColors.BLUE}Train loss:{TextColors.ENDC} {train_loss:.4f}")
             print(f"{TextColors.CYAN}Test loss:{TextColors.ENDC} {test_loss:.4f}") 
-            print(f"{TextColors.GREEN}Accuracy:{TextColors.ENDC} {accuracy:.4f}\n")
+            print(f"{TextColors.GREEN}Accuracy:{TextColors.ENDC} {test_accuracy:.4f}\n")
             print(f"Time Elapsed from Last Epoch: {t1 - t0}")
             t0 = t1
             if save_model_every_n_epochs > 0 and (i+1) % save_model_every_n_epochs == 0 and i+1 != epochs:
@@ -166,10 +166,12 @@ class Trainer:
         """
         Train the model for one epoch.
         """
-        # scaler = torch.cuda.amp.GradScaler()
+        self.model.cuda()
+        self.classifier.cuda()
         self.model.train()
         self.classifier.train()
         total_loss = 0
+        correct = 0
         for batch in trainloader:
             # Move the batch to the device
             batch = [t.to(self.device) for t in batch]
@@ -184,7 +186,11 @@ class Trainer:
             # Update the model's parameters
             self.optimizer.step()
             total_loss += loss.item() * len(images)
-        return total_loss / len(trainloader.dataset)
+            # Calculate the number of correct predictions
+            predictions = torch.argmax(logits, dim=1)
+            correct += torch.sum(predictions == labels).item()
+        accuracy = correct / len(trainloader.dataset)
+        return total_loss / len(trainloader.dataset), accuracy
 
     @torch.no_grad()
     def evaluate(self, testloader):
@@ -213,6 +219,22 @@ class Trainer:
         avg_loss = total_loss / len(testloader.dataset)
         return accuracy, avg_loss
 
+class LinearClassifier(nn.Module):
+    """Linear layer to train on top of frozen features"""
+    def __init__(self, dim, num_labels=NUM_CLASSES):
+        super(LinearClassifier, self).__init__()
+        self.num_labels = num_labels
+        self.linear = nn.Linear(dim, num_labels)
+        self.linear.weight.data.normal_(mean=0.0, std=0.01)
+        self.linear.bias.data.zero_()
+
+    def forward(self, x):
+        # flatten
+        x = x.view(x.size(0), -1)
+
+        # linear layer
+        return self.linear(x)
+
 
 def main():
     # Training parameters
@@ -226,7 +248,8 @@ def main():
                 in_chans= NUM_CHANNELS,
                 num_classes= NUM_CLASSES,
                 embed_dim= HIDDEN_SIZE)
-    classifier = nn.Linear(HIDDEN_SIZE, NUM_CLASSES)
+    # classifier = nn.Linear(HIDDEN_SIZE, NUM_CLASSES)
+    classifier = LinearClassifier(HIDDEN_SIZE, num_labels = NUM_CLASSES)
     optimizer = optim.AdamW(list(model.parameters()) + list(classifier.parameters()), lr=LR, weight_decay=1e-2)
     # optimizer = optim.SGD(model.parameters(), lr = LR, weight_decay = 1e-2, momentum = 0.9)
     loss_fn = nn.CrossEntropyLoss()

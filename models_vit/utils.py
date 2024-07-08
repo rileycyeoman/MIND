@@ -159,6 +159,7 @@ class LinformerSelfAttention(nn.Module):
 
 class TransformedSubset(torch.utils.data.Dataset):
     def __init__(self, subset, transform=None):
+        super.__init__()
         self.subset = subset
         self.transform = transform
         self.classes = subset.dataset.classes
@@ -199,6 +200,9 @@ class DataHandler:
         self.train_transform = self.get_train_transform()
         self.test_transform = self.get_test_transform()
         self.num_channels = num_channels
+        
+        
+        
     def get_train_transform(self):
         additional_transforms = [
             transforms.RandomRotation(10),
@@ -216,6 +220,9 @@ class DataHandler:
             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
             # transforms.Normalize((0.5,) * 1, (0.5,) * 1)
         ])
+        
+        
+        
     def get_test_transform(self):
         return transforms.Compose([
             # transforms.Grayscale(num_output_channels= 1),
@@ -224,8 +231,6 @@ class DataHandler:
             # transforms.Normalize((0.5,) * 1, (0.5,) * 1)
             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
         ])
-
-
 
 
     def get_dataset(self, train=True):
@@ -247,14 +252,23 @@ class DataHandler:
             train_input = '/home/yeoman/MIND/models_vit/data/train'
             test_input = '/home/yeoman/MIND/models_vit/data/test'
             if train:
-                dataset = torchvision.datasets.ImageFolder(root=train_input, transform=self.train_transform)
+                dataset = torchvision.datasets.ImageFolder(root=train_input,
+                                                           transform=self.train_transform,
+                                                           target_transform=None)
             else:
-                dataset = torchvision.datasets.ImageFolder(root=test_input, transform=self.test_transform)
+                dataset = torchvision.datasets.ImageFolder(root=test_input,
+                                                           transform=self.test_transform)
             self.classes = dataset.classes
-        
+            # print(self.classes)
+            # print(len(dataset))
+            
+    
         else:
             raise ValueError(f"Unsupported dataset: {self.dataset_name}")
         return dataset
+    
+    
+    
     def get_data_loader(self, dataset, train=True):
         if train and self.train_sample_size is not None:
             indices = torch.randperm(len(dataset))[:self.train_sample_size]
@@ -269,6 +283,8 @@ class DataHandler:
                           num_workers=self.num_workers, 
                           drop_last=not train, 
                           pin_memory=True)
+        
+        
 
     def prepare_data(self):
         trainset = self.get_dataset(train=True)
@@ -278,4 +294,4 @@ class DataHandler:
         testloader = self.get_data_loader(testset, train=False)
 
         classes = trainset.dataset.classes if isinstance(trainset, Subset) else trainset.classes
-        return trainloader, testloader, classes
+        return trainloader, testloader, self.classes

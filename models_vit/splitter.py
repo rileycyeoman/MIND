@@ -1,5 +1,5 @@
 import os
-
+from torchvision import datasets, transforms
 import shutil
 import random
 #use this for annoying datasets that aren't presplit
@@ -38,4 +38,41 @@ source_folder = "/home/yeoman/research/NHF"
 train_folder = '/home/yeoman/MIND/models_vit/data/train'
 test_folder = '/home/yeoman/MIND/models_vit/data/test'
 
-split_data(source_folder, train_folder, test_folder)
+# split_data(source_folder, train_folder, test_folder)
+
+def walk_through_dir(dir_path):
+  """
+  Walks through dir_path returning its contents.
+  Args:
+    dir_path (str or pathlib.Path): target directory
+  
+  Returns:
+    A print out of:
+      number of subdiretories in dir_path
+      number of images (files) in each subdirectory
+      name of each subdirectory
+  """
+  for dirpath, dirnames, filenames in os.walk(dir_path):
+    print(f"There are {len(dirnames)} directories and {len(filenames)} images in '{dirpath}'.")
+    
+
+walk_through_dir(train_folder)
+data_transform = transforms.Compose([
+    # Resize the images to 64x64
+    transforms.Resize(size=(64, 64)),
+    # Flip the images randomly on the horizontal
+    transforms.RandomHorizontalFlip(p=0.5), # p = probability of flip, 0.5 = 50% chance
+    # Turn the image into a torch.Tensor
+    transforms.ToTensor() # this also converts all pixel values from 0 to 255 to be between 0.0 and 1.0 
+])
+train_data = datasets.ImageFolder(root=train_folder, # target folder of images
+                                  transform=data_transform, # transforms to perform on data (images)
+                                  target_transform=None) # transforms to perform on labels (if necessary)
+
+test_data = datasets.ImageFolder(root=test_folder, 
+                                 transform=data_transform)
+
+print(f"Train data:\n{train_data}\nTest data:\n{test_data}")
+class_names = train_data.classes
+class_dict = train_data.class_to_idx
+print(class_dict)
