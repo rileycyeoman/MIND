@@ -133,8 +133,6 @@ class Trainer:
         self.loss_fn = loss_fn
         self.exp_name = exp_name
         self.device = device
-        self.model = model
-
     def train(self, trainloader, testloader, epochs, save_model_every_n_epochs=0):
         """
         Train the model for the specified number of epochs.

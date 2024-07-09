@@ -217,7 +217,7 @@ class DataHandler:
             transforms.RandomApply(additional_transforms, p=0.5),
             transforms.RandomHorizontalFlip(p=0.5),
             transforms.RandomResizedCrop((self.image_size, self.image_size), scale=(0.8, 1.0), ratio=(0.75, 1.3333333333333333), interpolation=2, antialias=True),
-            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+            transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
             # transforms.Normalize((0.5,) * 1, (0.5,) * 1)
         ])
         
@@ -228,8 +228,9 @@ class DataHandler:
             # transforms.Grayscale(num_output_channels= 1),
             transforms.ToTensor(),
             transforms.Resize((self.image_size, self.image_size), antialias=True),
+            transforms.CenterCrop(224),
             # transforms.Normalize((0.5,) * 1, (0.5,) * 1)
-            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+            transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
         ])
 
 
@@ -258,13 +259,16 @@ class DataHandler:
             else:
                 dataset = torchvision.datasets.ImageFolder(root=test_input,
                                                            transform=self.test_transform)
-            self.classes = dataset.classes
-            # print(self.classes)
-            # print(len(dataset))
+
             
     
         else:
             raise ValueError(f"Unsupported dataset: {self.dataset_name}")
+        
+        self.classes = dataset.classes
+        # print(self.classes)
+        # print(len(dataset))
+        
         return dataset
     
     
