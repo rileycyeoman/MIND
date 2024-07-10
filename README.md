@@ -13,11 +13,21 @@ MIND is a machine learning model that combines META's DINO model and a Long Shor
     - $\textcolor{purple}{Contempt}$
     - $\textcolor{gray}{Neutral}$  
 
-- Emotions are defined differently from greater psychological issues. Being either happy and anxious can both be short-term psychological symptoms, however, something like Generalized Anxiety Disorder can't necessarily be seen as instantaneous. Dually, "happy," in terms of an image or video classification, can be from a single frame or set of images being strong enough probability-wise to force a machine learning model to interpret the data as a single emotion. 
+- Emotions are defined differently from greater psychological issues. Being either happy and anxious can both be short-term psychological symptoms not indicating anything larger. However, something like Generalized Anxiety Disorder (GED) can't be seen as instantaneous. Dually, "happy," in terms of an image or video classification, can be from a single frame or set of images being strong enough probability-wise to force a machine learning model to interpret the data as a single emotion. 
 
 
 ## Previous Work
 ### DINO and Self-Supervision
+Among the list of improvements to base models that exist for transformers, self-supervision is perhaps one of the largest improvements. Put simply, the act of self-supervision is training without labels, creating a "black box" of sorts for the training, where the learnable parameters are at their lowest point of explainability. That being said, this provides a unique benefit for transformers. Self-supervision allows a transformer to teach itself attention scores in a way that vastly outperforms simple classifier scoring-based methods. The model used here is Meta's DINO model (Self-Distillation with No Labels).  
+
+Self-distillation refers to the act of a student network (a model that has less information and guesses the output) learning from a teacher network (a model that "knows the answer" since it's given more information) and no-label is referring to there being no dataset labels used for training. The student is fed information such as images with local crops, distorted views, etc., while the teacher sees the whole image. For the teacher, it's mostly important that the output remains in a normal distribution, but the errors are not propagated, that is only for the student since it's the one learning.
+
+Meta showed that this is an effective alternative to supervision. In the following image, it is clear that attention learned from self-supervision is much more clean and intuitive to what one would expect to be important in any image:
+<figure style = "text-align: center;">
+  <img src="images/dino.png" alt="DINO Attention" title="MIND">
+  <figcaption>Figure x: DINO versus normal supervision attention mapping. </figcaption>
+</figure>
+
 
 ### TimeSformer
 While Meta's DINO model works with video to an extent, there is room for experimentation. TimeSformer utilizes temporal-spatial relationships between video frames and 

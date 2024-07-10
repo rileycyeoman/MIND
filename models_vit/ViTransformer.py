@@ -239,13 +239,12 @@ class MLP(nn.Module):
     def __init__(self):
         super().__init__()
         self.fc1 = nn.Linear(in_features=HIDDEN_SIZE,out_features=INTERMEDIATE_SIZE)
-        # self.fc1= nn.Linear(HIDDEN_SIZE, INTERMEDIATE_SIZE)
-        # self.act = nn.GELU()
+
         self.act = nn.GELU()
         self.fc2 = nn.Linear(in_features=INTERMEDIATE_SIZE,out_features=HIDDEN_SIZE)
-        # self.fc2 = nn.Linear(INTERMEDIATE_SIZE, HIDDEN_SIZE)
+
         self.drop = nn.Dropout(p = HIDDEN_DROPOUT_PROB)
-        # self.drop = nn.Dropout(HIDDEN_DROPOUT_PROB)
+       
 
     def forward(self, x):
         x = self.fc1(x)
