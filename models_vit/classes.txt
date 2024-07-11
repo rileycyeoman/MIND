@@ -20,3 +20,18 @@
         "disgust",
         "happy"
       ]
+
+
+
+[
+        "truck",
+        "frog",
+        "dog",
+        "deer",
+        "bird",
+        "automobile",
+        "cat",
+        "airplane",
+        "horse",
+        "ship"
+      ]

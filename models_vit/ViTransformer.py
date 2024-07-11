@@ -112,9 +112,9 @@ class Attention(nn.Module): #Linformer transformer
     ) -> None:
         super().__init__()
         assert dim % num_heads == 0, 'dim should be divisible by num_heads'
-        self.num_heads = num_heads
-        self.head_dim = dim // num_heads
-        self.scale = self.head_dim ** -0.5
+        self.num_heads = num_heads 
+        self.head_dim = dim // num_heads #input dimension divided by num heads
+        self.scale = self.head_dim ** -0.5 
 
         self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
         self.q_norm = norm_layer(self.head_dim) if qk_norm else nn.Identity()
@@ -127,7 +127,7 @@ class Attention(nn.Module): #Linformer transformer
         self.linformer_attn = utils.LinformerSelfAttention(dim=dim, seq_len=seq_len, heads=num_heads, dim_head=self.head_dim)
 
     def forward(self, x:torch.Tensor) -> torch.Tensor:
-        B, N, C = x.shape
+        B, N, C = x.shape #batch, 
         qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, self.head_dim).permute(2, 0, 3, 1, 4)
         q, k, v = qkv.unbind(0)
         q, k = self.q_norm(q), self.k_norm(k)
@@ -290,8 +290,6 @@ class Block(nn.Module):
         y, attn = self.attn(self.norm1(x))
         if return_attention:
             return attn
-        # x = x + self.drop_path(y)
-        # x = x + self.drop_path(self.mlp(self.norm1(x)))
         x = x + y
         x = x + self.mlp(self.norm2(x))
         return x
@@ -308,7 +306,6 @@ class ViT(nn.Module):
         self.img_size = IMAGE_SIZE
         self.hidden_size = HIDDEN_SIZE
         self.num_classes = NUM_CLASSES
-        self.classifier = nn.Linear(HIDDEN_SIZE, NUM_CLASSES)
         # Create the embedding module
         self.patch_embed = PatchEmbeddings()
         num_patches = self.patch_embed.num_patches
@@ -317,7 +314,6 @@ class ViT(nn.Module):
         self.pos_drop = nn.Dropout(p=drop_rate)
         self.norm = norm_layer(embed_dim)
         # Create a linear layer to project the encoder's output to the number of classes
-        # self.classifier = nn.Linear(self.hidden_size, self.num_classes)
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)] 
         self.blocks = nn.ModuleList([
             Block(
@@ -464,7 +460,6 @@ class DINO(nn.Module):
         self.pos_drop = nn.Dropout(p=drop_rate)
         self.norm = norm_layer(embed_dim)
         # Create a linear layer to project the encoder's output to the number of classes
-        # self.classifier = nn.Linear(self.hidden_size, self.num_classes)
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)] 
         self.blocks = nn.ModuleList([
             Block(

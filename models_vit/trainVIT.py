@@ -164,8 +164,6 @@ class Trainer:
         """
         Train the model for one epoch.
         """
-        self.model.cuda()
-        self.classifier.cuda()
         self.model.train()
         self.classifier.train()
         total_loss = 0
@@ -178,6 +176,7 @@ class Trainer:
             self.optimizer.zero_grad()
             # Calculate the loss
             logits = self.classifier(self.model(images))
+            # logits = self.classifier(self.model.get_intermediate_layers(images))
             loss = self.loss_fn(logits, labels)
             # Backpropagate the loss
             loss.backward()
@@ -198,18 +197,14 @@ class Trainer:
         correct = 0
         with torch.no_grad():
             for batch in testloader:
-                # Move the batch to the device
                 batch = [t.to(self.device) for t in batch]
-                images, labels = batch
-
                 # Get predictions
+                images, labels = batch
                 features  = self.model(images)
                 logits = self.classifier(features)
-
                 # Calculate the loss
                 loss = self.loss_fn(logits, labels)
                 total_loss += loss.item() * len(images)
-
                 # Calculate the accuracy
                 predictions = torch.argmax(logits, dim=1)
                 correct += torch.sum(predictions == labels).item()
@@ -217,22 +212,31 @@ class Trainer:
         avg_loss = total_loss / len(testloader.dataset)
         return accuracy, avg_loss
 
+# class LinearClassifier(nn.Module):
+#     """Linear layer to train on top of frozen features"""
+#     def __init__(self, dim, num_labels=NUM_CLASSES):
+#         super(LinearClassifier, self).__init__()
+#         self.num_labels = num_labels
+#         self.linear = nn.Linear(dim, num_labels)
+#         self.linear.weight.data.normal_(mean=0.0, std=0.01)
+#         self.linear.bias.data.zero_()
+
+#     def forward(self, x):
+#         # flatten
+#         x = x.view(x.size(0), -1)
+
+#         # linear layer
+#         return self.linear(x)
+
+
 class LinearClassifier(nn.Module):
     """Linear layer to train on top of frozen features"""
-    def __init__(self, dim, num_labels=NUM_CLASSES):
+    def __init__(self, dim, num_labels):
         super(LinearClassifier, self).__init__()
-        self.num_labels = num_labels
         self.linear = nn.Linear(dim, num_labels)
-        self.linear.weight.data.normal_(mean=0.0, std=0.01)
-        self.linear.bias.data.zero_()
 
     def forward(self, x):
-        # flatten
-        x = x.view(x.size(0), -1)
-
-        # linear layer
         return self.linear(x)
-
 
 def main():
     # Training parameters
