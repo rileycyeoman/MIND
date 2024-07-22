@@ -184,7 +184,7 @@ class DataHandler:
                 num_workers : int = 4, 
                 train_sample_size : int = None, 
                 test_sample_size  : int = None, 
-                image_size : int = 32,
+                image_size : int = 224,
                 num_channels : int = 3,
                 )-> None:
         self.root_dir = root_dir

@@ -28,7 +28,8 @@ SEQ_LEN = int(config['PARAMETERS']['seq_len'])
 
 def drop_path(x, drop_prob: float = 0., training: bool = False):
     # return x
-    if drop_prob == 0. or not training:
+    # if drop_prob == 0. or not training:
+    if drop_prob == 0.:
         return x
     keep_prob = 1 - drop_prob
     shape = (x.shape[0],) + (1,) * (x.ndim - 1)  # work with diff dim tensors, not just 2D ConvNets
@@ -37,10 +38,6 @@ def drop_path(x, drop_prob: float = 0., training: bool = False):
     output = x.div(keep_prob) * random_tensor
     return output
 
-# def get_EF(input_size, dim, bias = True):
-#     lin = nn.Linear(input_size, dim, bias)
-#     torch.nn.init.xavier_normal_(lin.weight)
-#     return lin
 
 def init_(tensor):
     dim = tensor.shape[-1]
@@ -112,9 +109,9 @@ class Attention(nn.Module): #Linformer transformer
     ) -> None:
         super().__init__()
         assert dim % num_heads == 0, 'dim should be divisible by num_heads'
-        self.num_heads = num_heads 
+        self.num_heads = num_heads #Number of attention Heads
         self.head_dim = dim // num_heads #input dimension divided by num heads
-        self.scale = self.head_dim ** -0.5 
+        self.scale = self.head_dim ** -0.5  
 
         self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
         self.q_norm = norm_layer(self.head_dim) if qk_norm else nn.Identity()
@@ -150,10 +147,6 @@ class Attention(nn.Module): #Linformer transformer
 
 
 
-
-
-
-
 class LayerScale(nn.Module):
     def __init__(
             self,
@@ -176,58 +169,31 @@ class PatchEmbeddings(nn.Module):
 
     def __init__(
         self,  
-        img_size: int = 32, 
-        patch_size:int = 4,
-        in_channels:int = 1) -> None: 
+        img_size: int = 224, 
+        patch_size:int = 16,
+        hidden_size: int = 768,
+        in_channels:int = 3) -> None: 
         super().__init__()
         self.img_size = IMAGE_SIZE #(h,w)
         self.patch_size = PATCH_SIZE # 16
         self.in_channels = NUM_CHANNELS # 1 or 3
         self.hidden_size = HIDDEN_SIZE #usually 768
         
-        self.num_patches = (self.img_size // self.patch_size) ** 2 # (h * w)/p^2
-        self.proj = nn.Conv2d(in_channels= self.in_channels, 
-                              out_channels=self.hidden_size, 
-                              kernel_size=self.patch_size, 
-                              stride=self.patch_size) # (C, Hid, kernel size, stride)
+        self.num_patches = (self.img_size // self.patch_size) ** 2 # ((h * w)/p)^2
+         # (C, Hid, kernel size, stride)
+        self.proj = nn.Conv2d(in_channels= self.in_channels, #Number of color channels
+                              out_channels=self.hidden_size, #the hidden layer
+                              kernel_size=self.patch_size, #patch size of image
+                              stride=self.patch_size) #stride with patches
 
     def forward(self, x):
         B, C, H, W = x.shape #not necessary but good for showing what's what
+        #N = HW/P^2
+        #Ignoring batch size, x-> x_p = (C,H,W) -> (N, P^2 * C)
+        #(B,C,H,W) -> (B,N, Hidden)
+        print(x.shape)
         x = self.proj(x).flatten(2).transpose(1, 2)
-        return x
-
-
-class Embeddings(nn.Module):
-    """
-    Combine the patch embeddings with the class token and position embeddings. 
-    """
-
-    def __init__(self):
-        super().__init__()
-        self.patch_embeddings = PatchEmbeddings()
-        # Create a learnable [CLS] token
-        # Similar to BERT, the [CLS] token is added to the beginning of the input sequence
-        # and is used to classify the entire sequence
-        self.cls_token = nn.Parameter(torch.randn(1, 1, HIDDEN_SIZE))
-        # Create position embeddings for the [CLS] token and the patch embeddings
-        # Add 1 to the sequence length for the [CLS] token
-        self.position_embeddings = \
-            nn.Parameter(torch.randn(1, self.patch_embeddings.num_patches + 1, HIDDEN_SIZE))
-        self.dropout = nn.Dropout(HIDDEN_DROPOUT_PROB)
-                
-        
-
-    def forward(self, x):
-        x = self.patch_embeddings(x)
-        batch_size, _, _ = x.size()
-        # Expand the [CLS] token to the batch size
-        # (1, 1, hidden_size) -> (batch_size, 1, hidden_size)
-        cls_tokens = self.cls_token.expand(batch_size, -1, -1)
-        # Concatenate the [CLS] token to the beginning of the input sequence
-        # This results in a sequence length of (num_patches + 1)
-        x = torch.cat((cls_tokens, x), dim=1)
-        x = x + self.position_embeddings
-        x = self.dropout(x)
+        print(x.shape)
         return x
 
 
@@ -299,15 +265,16 @@ class ViT(nn.Module):
     The ViT model for classification.
     """
 
-    def __init__(self, img_size=IMAGE_SIZE, patch_size=PATCH_SIZE, in_chans=NUM_CHANNELS, num_classes=NUM_CLASSES, embed_dim=HIDDEN_SIZE, depth=12,
+    def __init__(self, img_size=IMAGE_SIZE, patch_size=PATCH_SIZE, in_chans=NUM_CHANNELS, num_classes=NUM_CLASSES, embed_dim=INTERMEDIATE_SIZE, depth=12,
                  num_heads=NUM_ATTENTION_HEADS, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop_rate=0., attn_drop_rate=0.,
                  drop_path_rate=0., norm_layer=nn.LayerNorm, **kwargs): #TODO: FIX NORM LAYER BEING CALLED OUT EARLIER?
         super().__init__()
         self.img_size = IMAGE_SIZE
-        self.hidden_size = HIDDEN_SIZE
+        self.hidden_size = embed_dim
         self.num_classes = NUM_CLASSES
+        self.num_features = self.hidden_size
         # Create the embedding module
-        self.patch_embed = PatchEmbeddings()
+        self.patch_embed = PatchEmbeddings(img_size=img_size, patch_size=patch_size, in_channels=in_chans, hidden_size=embed_dim)
         num_patches = self.patch_embed.num_patches
         self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
         self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, embed_dim))
