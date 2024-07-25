@@ -196,10 +196,13 @@ class Trainer:
         total_loss = 0
         correct = 0
         with torch.no_grad():
+            #go through entire batch
             for batch in testloader:
+                #send each to GPU
                 batch = [t.to(self.device) for t in batch]
                 # Get predictions
                 images, labels = batch
+                
                 features  = self.model(images)
                 logits = self.classifier(features)
                 # Calculate the loss

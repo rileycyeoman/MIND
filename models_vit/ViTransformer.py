@@ -189,11 +189,11 @@ class PatchEmbeddings(nn.Module):
     def forward(self, x):
         B, C, H, W = x.shape #not necessary but good for showing what's what
         #N = HW/P^2
-        #Ignoring batch size, x-> x_p = (C,H,W) -> (N, P^2 * C)
+        # x-> x_p = (B,C,H,W) -> (B,N, P^2 * C)
         #(B,C,H,W) -> (B,N, Hidden)
-        print(x.shape)
+        # print(x.shape)
         x = self.proj(x).flatten(2).transpose(1, 2)
-        print(x.shape)
+        # print(x.shape)
         return x
 
 
@@ -287,7 +287,11 @@ class ViT(nn.Module):
                 dim=embed_dim, num_heads=num_heads, qkv_bias=qkv_bias,
                 proj_drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer)
             for i in range(depth)])
+        self.norm = norm_layer(embed_dim)
+        self.head = nn.Linear(embed_dim, num_classes) if num_classes > 0 else nn.Identity
         # Initialize the weights
+        nn.init.trunc_normal_(self.pos_embed, std=.02)
+        nn.init.trunc_normal_(self.cls_token, std=.02)
         self.apply(self._init_weights)
 
 
