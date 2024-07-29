@@ -133,6 +133,35 @@ class Trainer:
         self.loss_fn = loss_fn
         self.exp_name = exp_name
         self.device = device
+        
+        
+    def pretrain(self, pretrainloader, epochs, save_model_every_n_epochs=0):
+        """
+        Pre-train the model for the specified number of epochs.
+        """
+        for epoch in range(epochs):
+            pretrain_loss, pretrain_accuracy = self.train_epoch(pretrainloader)
+            print(f"Pretrain Epoch: {epoch+1}, Loss: {pretrain_loss:.4f}, Accuracy: {pretrain_accuracy:.4f}")
+            if save_model_every_n_epochs > 0 and (epoch+1) % save_model_every_n_epochs == 0 and epoch+1 != epochs:
+                print('\tSave pretrain checkpoint at epoch', epoch+1)
+                save_checkpoint(self.exp_name + '_pretrain', self.model, epoch+1)
+        save_checkpoint(self.exp_name + '_pretrain_final', self.model, epochs)
+
+    
+
+    def finetune(self, finetuneloader, epochs, save_model_every_n_epochs=0):
+        """
+        Fine-tune the model for the specified number of epochs.
+        """
+        for epoch in range(epochs):
+            finetune_loss, finetune_accuracy = self.train_epoch(finetuneloader)
+            print(f"Fine-tune Epoch: {epoch+1}, Loss: {finetune_loss:.4f}, Accuracy: {finetune_accuracy:.4f}")
+            if save_model_every_n_epochs > 0 and (epoch+1) % save_model_every_n_epochs == 0 and epoch+1 != epochs:
+                print('\tSave finetune checkpoint at epoch', epoch+1)
+                save_checkpoint(self.exp_name + '_finetune', self.model, epoch+1)
+        save_checkpoint(self.exp_name + '_finetune_final', self.model, epochs)
+    
+        
     def train(self, trainloader, testloader, epochs, save_model_every_n_epochs=0):
         """
         Train the model for the specified number of epochs.
@@ -260,9 +289,13 @@ def main():
     loss_fn = nn.CrossEntropyLoss()
     
     trainer = Trainer(model, optimizer, classifier, loss_fn, EXP_NAME, device=device)
-    print(f"{TextColors.BOLD}==============Training MIND=============={TextColors.ENDC}")
+    print("==============Pre-training MIND==============")
+    # trainer.pretrain(pretrainloader, PRETRAIN_EPOCHS, save_model_every_n_epochs=save_model_every_n_epochs)
+    print("==============Training MIND==============")
     trainer.train(trainloader, testloader, EPOCHS, save_model_every_n_epochs=save_model_every_n_epochs)
-    print(f"{TextColors.BOLD}==============Training done=============={TextColors.ENDC}")
+    print("==============Fine-tuning MIND==============")
+    # trainer.finetune(finetuneloader, FINETUNE_EPOCHS, save_model_every_n_epochs=save_model_every_n_epochs)
+    print("==============Training done==============")
 
 if __name__ == '__main__':
     main()
