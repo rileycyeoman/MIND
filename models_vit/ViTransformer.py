@@ -80,12 +80,12 @@ class DropPath(nn.Module):
 #         self.proj = nn.Linear(dim, dim)
 #         self.proj_drop = nn.Dropout(proj_drop)
 #     def forward(self, x:torch.Tensor) -> torch.Tensor:
-#         B, N, C = x.shape
+#         B, N, C = x.shape #batch size, patch, features
 #         qkv = self.qkv(x).reshape(B,N,3,self.num_heads, self.head_dim).permute(2, 0, 3, 1, 4)
-#         q, k, v = qkv.unbind(0)
-#         q, k = self.q_norm(q), self.k_norm(k)
-#         q = q * self.scale
-#         attn = q @ k.transpose(-2, -1)
+#         q, k, v = qkv.unbind(0) #unbinding tensor into 3 separate tensors
+#         q, k = self.q_norm(q), self.k_norm(k) #normalizing q and k
+#         q = q * self.scale #scaling q
+#         attn = q @ k.transpose(-2, -1) 
 #         attn = attn.softmax(dim=-1)
 #         attn = self.attn_drop(attn)
 #         x = attn @ v
