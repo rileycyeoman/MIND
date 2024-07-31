@@ -126,8 +126,9 @@ class Trainer:
     The simple trainer.
     """
 
-    def __init__(self, model, optimizer, classifier, loss_fn, exp_name, device):
-        self.model = model.to(device)
+    def __init__(self, student_model, teacher_model, optimizer, classifier, loss_fn, exp_name, device):
+        self.student_model = student_model.to(device)
+        self.teacher_model = teacher_model.to(device)
         self.optimizer = optimizer
         self.classifier = classifier.to(device)
         self.loss_fn = loss_fn
@@ -187,13 +188,13 @@ class Trainer:
                 print('\tSave checkpoint at epoch', i+1)
                 save_checkpoint(self.exp_name, self.model, i+1)
         # Save the experiment
-        save_experiment(self.exp_name, config, self.model, train_losses, test_losses, accuracies)
+        save_experiment(self.exp_name, config, self.student_model, train_losses, test_losses, accuracies)
 
     def train_epoch(self, trainloader):
         """
         Train the model for one epoch.
         """
-        self.model.train()
+        self.student_model.train()
         self.classifier.train()
         total_loss = 0
         correct = 0
@@ -220,7 +221,7 @@ class Trainer:
 
     @torch.no_grad()
     def evaluate(self, testloader):
-        self.model.eval()
+        self.student_model.eval()
         self.classifier.eval()
         total_loss = 0
         correct = 0
@@ -232,7 +233,7 @@ class Trainer:
                 # Get predictions
                 images, labels = batch
                 
-                features  = self.model(images)
+                features  = self.student_model(images)
                 logits = self.classifier(features)
                 # Calculate the loss
                 loss = self.loss_fn(logits, labels)
@@ -277,18 +278,23 @@ def main():
     data_loader = DataHandler(batch_size=BATCH_SIZE, dataset_name= DATASET ,num_workers=4, train_sample_size= None, test_sample_size = None)
     trainloader, testloader, _ = data_loader.prepare_data()
     # Create the model, optimizer, loss function and trainer
-    model = ViT(img_size = IMAGE_SIZE,
+    student_model = ViT(img_size = IMAGE_SIZE,
+                patch_size= PATCH_SIZE,
+                in_chans= NUM_CHANNELS,
+                num_classes= NUM_CLASSES,
+                embed_dim= HIDDEN_SIZE)
+    teacher_model = ViT(img_size = IMAGE_SIZE,
                 patch_size= PATCH_SIZE,
                 in_chans= NUM_CHANNELS,
                 num_classes= NUM_CLASSES,
                 embed_dim= HIDDEN_SIZE)
     # classifier = nn.Linear(HIDDEN_SIZE, NUM_CLASSES)
     classifier = LinearClassifier(HIDDEN_SIZE, num_labels = NUM_CLASSES)
-    optimizer = optim.AdamW(list(model.parameters()) + list(classifier.parameters()), lr=LR, weight_decay=1e-2)
+    optimizer = optim.AdamW(list(student_model.parameters()) + list(classifier.parameters()), lr=LR, weight_decay=1e-2)
     # optimizer = optim.SGD(model.parameters(), lr = LR, weight_decay = 1e-2, momentum = 0.9)
     loss_fn = nn.CrossEntropyLoss()
     
-    trainer = Trainer(model, optimizer, classifier, loss_fn, EXP_NAME, device=device)
+    trainer = Trainer(student_model, optimizer, classifier, loss_fn, EXP_NAME, device=device)
     print("==============Pre-training MIND==============")
     # trainer.pretrain(pretrainloader, PRETRAIN_EPOCHS, save_model_every_n_epochs=save_model_every_n_epochs)
     print("==============Training MIND==============")

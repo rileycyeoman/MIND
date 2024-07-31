@@ -148,11 +148,64 @@ class LinformerSelfAttention(nn.Module):
         return self.to_out(out)
 
 
+#DINO Utilities
+#Borrowing from jankrepl from overfitted https://github.com/jankrepl/mildlyoverfitted/blob/master/github_adventures/dino/utils.py
+class Loss(nn.Module):
+    def __init__(
+        self,
+        out_dim: int,
+        teacher_temp:float = 0.04,
+        student_temp:float = 0.1,
+        center_momentum:float = 0.9,
+    ):
+        super().__init__()
+        self.student_temp = student_temp
+        self.teacher_temp = teacher_temp
+        self.center_momentum = center_momentum
+        self.register_buffer("center", torch.zeros(1, out_dim)) #Buffer that is not updated by optimizer, dimension of [1,output features]
+        
+        
+        def forward(self, student_output, teacher_output):
+            #Normalizations from 3.1 on the original paper (prior to softmax)
+            student_temp = [s/self.student_temp for s in student_output] #this naming is misleading, it's not the temperature, rather the temp applied to the output
+            teacher_temp = [(t - self.center) / self.teacher_temp for t in teacher_output]
 
+            student_sm = [F.log_softmax(s, dim = -1) for s in student_temp]
+            teacher_sm = [F.log_softmax(t,dim=-1).detach() for t in teacher_temp]
 
+            total_loss = 0
+            n_loss_terms = 0
+            
+            for t_ix, t in enumerate(teacher_sm):
+                for s_ix, s in enumerate(student_sm):
+                    if t_ix == s_ix: #Ensure that only differing views are compared
+                        continue
+                    loss = torch.sum(-t * s, dim = -1) #sum dot product of outputs across feature dimension
+                    total_loss += loss.mean()
+                    n_loss_terms += 1
+            
+            total_loss /= n_loss_terms
+            self.update_center(teacher_output)
+            return total_loss
 
-
-
+        #equation 4 from paper
+        @torch.no_grad()
+        def update_center(self, teacher_output): 
+            batch_center = torch.cat(teacher_output).mean(dim = 0, keepdim=True) #(1, out_dim)
+            self.center = self.center * self.center_momentum + (1 - self.center_momentum) * batch_center
+        
+        #Prevent gradient from becoming too large, clip is maximum allowed norm of gradient
+        def clip_gradents(model, clip = 2.0):
+            #Cycle through model parameters
+            for p in model.parameters():
+                #Don't both with parameters that have no gradient to begin with
+                if p.grad is not None:
+                    #Compute L2 norm of parameter
+                    param_norm = p.grad.data.norm(2)
+                    #Divide norm by parameter norm, if param norm becomes too high, scale it by coefficient
+                    clip_coef = clip/(param_norm + 1e-6)
+                    if clip_coef < 1:
+                        p.grad.data.mul_(clip_coef)
 
 ###### Data Handling ######
 
