@@ -145,8 +145,8 @@ class Trainer:
             print(f"Pretrain Epoch: {epoch+1}, Loss: {pretrain_loss:.4f}, Accuracy: {pretrain_accuracy:.4f}")
             if save_model_every_n_epochs > 0 and (epoch+1) % save_model_every_n_epochs == 0 and epoch+1 != epochs:
                 print('\tSave pretrain checkpoint at epoch', epoch+1)
-                save_checkpoint(self.exp_name + '_pretrain', self.model, epoch+1)
-        save_checkpoint(self.exp_name + '_pretrain_final', self.model, epochs)
+                save_checkpoint(self.exp_name + '_pretrain', self.student_model, epoch+1)
+        save_checkpoint(self.exp_name + '_pretrain_final', self.student_model, epochs)
 
     
 
@@ -159,8 +159,8 @@ class Trainer:
             print(f"Fine-tune Epoch: {epoch+1}, Loss: {finetune_loss:.4f}, Accuracy: {finetune_accuracy:.4f}")
             if save_model_every_n_epochs > 0 and (epoch+1) % save_model_every_n_epochs == 0 and epoch+1 != epochs:
                 print('\tSave finetune checkpoint at epoch', epoch+1)
-                save_checkpoint(self.exp_name + '_finetune', self.model, epoch+1)
-        save_checkpoint(self.exp_name + '_finetune_final', self.model, epochs)
+                save_checkpoint(self.exp_name + '_finetune', self.student_model, epoch+1)
+        save_checkpoint(self.exp_name + '_finetune_final', self.student_model, epochs)
     
         
     def train(self, trainloader, testloader, epochs, save_model_every_n_epochs=0):
@@ -186,7 +186,7 @@ class Trainer:
             t0 = t1
             if save_model_every_n_epochs > 0 and (i+1) % save_model_every_n_epochs == 0 and i+1 != epochs:
                 print('\tSave checkpoint at epoch', i+1)
-                save_checkpoint(self.exp_name, self.model, i+1)
+                save_checkpoint(self.exp_name, self.student_model, i+1)
         # Save the experiment
         save_experiment(self.exp_name, config, self.student_model, train_losses, test_losses, accuracies)
 
@@ -205,7 +205,7 @@ class Trainer:
             # Zero the gradients
             self.optimizer.zero_grad()
             # Calculate the loss
-            logits = self.classifier(self.model(images))
+            logits = self.classifier(self.student_model(images))
             # logits = self.classifier(self.model.get_intermediate_layers(images))
             loss = self.loss_fn(logits, labels)
             # Backpropagate the loss
@@ -275,7 +275,7 @@ def main():
     # Training parameters
     save_model_every_n_epochs = SAVE_MODEL_EVERY
     # Load the dataset
-    data_loader = DataHandler(batch_size=BATCH_SIZE, dataset_name= DATASET ,num_workers=4, train_sample_size= None, test_sample_size = None)
+    data_loader = DataHandler(batch_size=BATCH_SIZE, dataset_name= DATASET, num_workers=4, train_sample_size= None, test_sample_size = None)
     trainloader, testloader, _ = data_loader.prepare_data()
     # Create the model, optimizer, loss function and trainer
     student_model = ViT(img_size = IMAGE_SIZE,
@@ -294,12 +294,12 @@ def main():
     # optimizer = optim.SGD(model.parameters(), lr = LR, weight_decay = 1e-2, momentum = 0.9)
     loss_fn = nn.CrossEntropyLoss()
     
-    trainer = Trainer(student_model, optimizer, classifier, loss_fn, EXP_NAME, device=device)
-    print("==============Pre-training MIND==============")
+    trainer = Trainer(student_model, teacher_model, optimizer, classifier, loss_fn, EXP_NAME, device=device)
+    print("==============MIND DINO Phase==============")
     # trainer.pretrain(pretrainloader, PRETRAIN_EPOCHS, save_model_every_n_epochs=save_model_every_n_epochs)
     print("==============Training MIND==============")
     trainer.train(trainloader, testloader, EPOCHS, save_model_every_n_epochs=save_model_every_n_epochs)
-    print("==============Fine-tuning MIND==============")
+    print("==============Validating MIND==============")
     # trainer.finetune(finetuneloader, FINETUNE_EPOCHS, save_model_every_n_epochs=save_model_every_n_epochs)
     print("==============Training done==============")
 

@@ -5,6 +5,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader, Subset
 import torchvision
 import json
+import pathlib
 from torchvision import transforms
 with open('config.json', 'r') as json_file:
     config = json.load(json_file)
@@ -150,6 +151,25 @@ class LinformerSelfAttention(nn.Module):
 
 #DINO Utilities
 #Borrowing from jankrepl from overfitted https://github.com/jankrepl/mildlyoverfitted/blob/master/github_adventures/dino/utils.py
+class MultiCropWrapper(nn.Module):
+    def __init__(
+        self,
+        backbone,
+        new_head
+    ):
+        super().__init__()
+        backbone.head = nn.Identity()
+        self.backbone = backbone
+        self.new_head = new_head
+        
+        def forward(self, x):
+            n_crops = len(x)
+            concat = torch.cat(x, dim = 0)
+            cls_embedding = self.backbone(concat)
+            logits = self.new_head(cls_embedding)
+            chunks = logits.chunk(n_crops)
+            return chunks
+
 class Loss(nn.Module):
     def __init__(
         self,
@@ -194,18 +214,18 @@ class Loss(nn.Module):
             batch_center = torch.cat(teacher_output).mean(dim = 0, keepdim=True) #(1, out_dim)
             self.center = self.center * self.center_momentum + (1 - self.center_momentum) * batch_center
         
-        #Prevent gradient from becoming too large, clip is maximum allowed norm of gradient
-        def clip_gradents(model, clip = 2.0):
-            #Cycle through model parameters
-            for p in model.parameters():
-                #Don't both with parameters that have no gradient to begin with
-                if p.grad is not None:
-                    #Compute L2 norm of parameter
-                    param_norm = p.grad.data.norm(2)
-                    #Divide norm by parameter norm, if param norm becomes too high, scale it by coefficient
-                    clip_coef = clip/(param_norm + 1e-6)
-                    if clip_coef < 1:
-                        p.grad.data.mul_(clip_coef)
+#Prevent gradient from becoming too large, clip is maximum allowed norm of gradient
+def clip_gradents(model, clip = 2.0):
+    #Cycle through model parameters
+    for p in model.parameters():
+        #Don't both with parameters that have no gradient to begin with
+        if p.grad is not None:
+            #Compute L2 norm of parameter
+            param_norm = p.grad.data.norm(2)
+            #Divide norm by parameter norm, if param norm becomes too high, scale it by coefficient
+            clip_coef = clip/(param_norm + 1e-6)
+            if clip_coef < 1:
+                p.grad.data.mul_(clip_coef)
 
 ###### Data Handling ######
 
@@ -255,7 +275,12 @@ class DataHandler:
         self.num_channels = num_channels
         
         
-        
+    
+    # def prepare_data():
+    #     path_train_dataset = pathlib.Path('/home/yeoman/MIND/models_vit/data/train')
+    #     path_val_dataset = pathlib.Path('/home/yeoman/MIND/models_vit/data/test')
+    
+    
     def get_train_transform(self):
         additional_transforms = [
             transforms.RandomRotation(10),
@@ -345,7 +370,7 @@ class DataHandler:
 
     def prepare_data(self):
         trainset = self.get_dataset(train=True)
-        testset = self.get_dataset(train=False)
+        testset = self.get_dataset(train=False) 
 
         trainloader = self.get_data_loader(trainset, train=True)
         testloader = self.get_data_loader(testset, train=False)
