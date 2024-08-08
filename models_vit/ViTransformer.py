@@ -190,10 +190,8 @@ class PatchEmbeddings(nn.Module):
         B, C, H, W = x.shape #not necessary but good for showing what's what
         #N = HW/P^2
         # x-> x_p = (B,C,H,W) -> (B,N, P^2 * C)
-        #(B,C,H,W) -> (B,N, Hidden)
-        # print(x.shape)
+        #(B,C,H,W) -> (B,N, Hidden) ->
         x = self.proj(x).flatten(2).transpose(1, 2)
-        # print(x.shape)
         return x
 
 
@@ -307,17 +305,17 @@ class ViT(nn.Module):
             
             
     def interpolate_pos_encoding(self, x, w, h):
-        npatch = x.shape[1] - 1
-        N = self.pos_embed.shape[1] - 1
-        if npatch == N and w == h:
+        npatch = x.shape[1] - 1 # the 1 is to ignore the class token
+        N = self.pos_embed.shape[1] - 1 
+        if npatch == N and w == h: #sizes match
             return self.pos_embed
-        class_pos_embed = self.pos_embed[:, 0]
-        patch_pos_embed = self.pos_embed[:, 1:]
+        class_pos_embed = self.pos_embed[:, 0] #class positional embeddings
+        patch_pos_embed = self.pos_embed[:, 1:] #token positional embeddings
         dim = x.shape[-1]
-        w0 = w // self.patch_embed.patch_size
+        w0 = w // self.patch_embed.patch_size 
         h0 = h // self.patch_embed.patch_size
         w0, h0 = w0 + 0.1, h0 + 0.1
-        patch_pos_embed = nn.functional.interpolate(
+        patch_pos_embed = nn.functional.interpolate( #interpolate to 2D
             patch_pos_embed.reshape(1, int(math.sqrt(N)), int(math.sqrt(N)), dim).permute(0, 3, 1, 2),
             scale_factor=(w0 / math.sqrt(N), h0 / math.sqrt(N)),
             mode='bicubic',
