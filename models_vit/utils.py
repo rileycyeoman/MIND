@@ -324,7 +324,9 @@ class DataHandler:
             else:
                 dataset = torchvision.datasets.ImageFolder(root=test_input, transform=self.test_transform)
         
-        
+        elif self.dataset_name == "imagenette":
+            pass 
+        #TODO add imagenette as sole training dataset
         
         elif self.dataset_name == 'NHF':
             

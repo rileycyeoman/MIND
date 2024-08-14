@@ -288,6 +288,8 @@ def main():
                 in_chans= NUM_CHANNELS,
                 num_classes= NUM_CLASSES,
                 embed_dim= HIDDEN_SIZE)
+    for p in teacher_model.parameters():
+        p.requires_grad = False
     # classifier = nn.Linear(HIDDEN_SIZE, NUM_CLASSES)
     classifier = LinearClassifier(HIDDEN_SIZE, num_labels = NUM_CLASSES)
     optimizer = optim.AdamW(list(student_model.parameters()) + list(classifier.parameters()), lr=LR, weight_decay=1e-2)
