@@ -5,6 +5,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader, Subset
 import torchvision
 import json
+from PIL import Image
 import pathlib
 from torchvision import transforms
 with open('config.json', 'r') as json_file:
@@ -276,106 +277,213 @@ class DataHandler:
         
         
     
-    # def prepare_data():
-    #     path_train_dataset = pathlib.Path('/home/yeoman/MIND/models_vit/data/train')
-    #     path_val_dataset = pathlib.Path('/home/yeoman/MIND/models_vit/data/test')
     
-    
-    def get_train_transform(self):
-        additional_transforms = [
-            transforms.RandomRotation(10),
-            transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.1),
-            transforms.RandomErasing(p=0.9, scale=(0.02, 0.2)),
-        ]
+    # def get_train_transform(self):
+    #     additional_transforms = [
+    #         transforms.RandomRotation(10),
+    #         transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.1),
+    #         transforms.RandomErasing(p=0.9, scale=(0.02, 0.2)),
+    #     ]
 
-        return transforms.Compose([
-            # transforms.Grayscale(num_output_channels= 1),
-            transforms.ToTensor(),
-            transforms.Resize((self.image_size, self.image_size), antialias=True),
-            transforms.RandomApply(additional_transforms, p=0.5),
-            transforms.RandomHorizontalFlip(p=0.5),
-            transforms.RandomResizedCrop((self.image_size, self.image_size), scale=(0.8, 1.0), ratio=(0.75, 1.3333333333333333), interpolation=2, antialias=True),
-            transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
-            # transforms.Normalize((0.5,) * 1, (0.5,) * 1)
-        ])
+    #     return transforms.Compose([
+    #         # transforms.Grayscale(num_output_channels= 1),
+    #         transforms.ToTensor(),
+    #         transforms.Resize((self.image_size, self.image_size), antialias=True),
+    #         transforms.RandomApply(additional_transforms, p=0.5),
+    #         transforms.RandomHorizontalFlip(p=0.5),
+    #         transforms.RandomResizedCrop((self.image_size, self.image_size), scale=(0.8, 1.0), ratio=(0.75, 1.3333333333333333), interpolation=2, antialias=True),
+    #         transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
+    #         # transforms.Normalize((0.5,) * 1, (0.5,) * 1)
+    #     ])
         
         
         
-    def get_test_transform(self):
-        return transforms.Compose([
-            # transforms.Grayscale(num_output_channels= 1),
-            transforms.ToTensor(),
-            transforms.Resize((self.image_size, self.image_size), antialias=True),
-            transforms.CenterCrop(224),
-            # transforms.Normalize((0.5,) * 1, (0.5,) * 1)
-            transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
-        ])
+    # def get_test_transform(self):
+    #     return transforms.Compose([
+    #         transforms.ToTensor(),
+    #         transforms.Resize((self.image_size, self.image_size), antialias=True),
+    #         transforms.CenterCrop(self.image_size),
+    #         transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
+    #     ])
 
 
-    def get_dataset(self, train=True):
-        if self.dataset_name == 'CIFAR10':
-            dataset = torchvision.datasets.CIFAR10(root=self.root, train=train, download=self.download, transform=self.train_transform if train else self.test_transform)
-        # Add more datasets as needed
-        elif self.dataset_name == 'FER2013':
-            train_input = "/home/yeoman/research/train" 
-            test_input = "/home/yeoman/research/test"  
-            if train:
-                dataset = torchvision.datasets.ImageFolder(root=train_input, transform=self.train_transform)
-            else:
-                dataset = torchvision.datasets.ImageFolder(root=test_input, transform=self.test_transform)
+    # def get_dataset(self, train=True):
+    #     # if self.dataset_name == 'CIFAR10':
+    #     #     dataset = torchvision.datasets.CIFAR10(root=self.root, train=train, download=self.download, transform=self.train_transform if train else self.test_transform)
+    #     # # Add more datasets as needed
+    #     # elif self.dataset_name == 'FER2013':
+    #     #     train_input = "/home/yeoman/research/train" 
+    #     #     test_input = "/home/yeoman/research/test"  
+    #     #     if train:
+    #     #         dataset = torchvision.datasets.ImageFolder(root=train_input, transform=self.train_transform)
+    #     #     else:
+    #     #         dataset = torchvision.datasets.ImageFolder(root=test_input, transform=self.test_transform)
         
-        elif self.dataset_name == "imagenette":
-            pass 
-        #TODO add imagenette as sole training dataset
         
-        elif self.dataset_name == 'NHF':
+    #     # #TODO add imagenette as sole training dataset
+        
+    #     # elif self.dataset_name == 'NHF':
             
-            train_input = '/home/yeoman/MIND/models_vit/data/train'
-            test_input = '/home/yeoman/MIND/models_vit/data/test'
-            if train:
-                dataset = torchvision.datasets.ImageFolder(root=train_input,
-                                                           transform=self.train_transform,
-                                                           target_transform=None)
-            else:
-                dataset = torchvision.datasets.ImageFolder(root=test_input,
-                                                           transform=self.test_transform)
+    #     #     train_input = '/home/yeoman/MIND/models_vit/data/train'
+    #     #     test_input = '/home/yeoman/MIND/models_vit/data/test'
+    #     #     if train:
+    #     #         dataset = torchvision.datasets.ImageFolder(root=train_input,
+    #     #                                                    transform=self.train_transform,
+    #     #                                                    target_transform=None)
+    #     #     else:
+    #     #         dataset = torchvision.datasets.ImageFolder(root=test_input,
+    #     #                                                    transform=self.test_transform)
 
-            
+    #     if self.dataset_name == "imagenette":
+    #         train_path = pathlib.Path('data/data_imagenette/train')
+    #         test_path = pathlib.Path('data/data_imagenette/val')
+    #         class_path = pathlib.Path('data/data_imagnette/imagenette_labels.json')
+    #         if train: 
+    #             dataset = torchvision.datasets.ImageFolder(root=train_path,
+    #                                                        transform=self.train_transform,
+    #                                                        target_transform=None)
+    #         else:
+    #             dataset = torchvision.datasets.ImageFolder(root=test_path,
+    #                                                        transform=self.test_transform)
     
-        else:
-            raise ValueError(f"Unsupported dataset: {self.dataset_name}")
+    #     else:
+    #         raise ValueError(f"Unsupported dataset: {self.dataset_name}")
         
-        self.classes = dataset.classes
-        # print(self.classes)
-        # print(len(dataset))
+    #     self.classes = dataset.classes
+    #     # print(self.classes)
+    #     # print(len(dataset))
         
-        return dataset
+    #     return dataset
     
     
     
-    def get_data_loader(self, dataset, train=True):
-        if train and self.train_sample_size is not None:
-            indices = torch.randperm(len(dataset))[:self.train_sample_size]
-            dataset = Subset(dataset, indices)
-        elif not train and self.test_sample_size is not None:
-            indices = torch.randperm(len(dataset))[:self.test_sample_size]
-            dataset = Subset(dataset, indices)
+    # def get_data_loader(self, dataset, train=True):
+    #     if train and self.train_sample_size is not None:
+    #         indices = torch.randperm(len(dataset))[:self.train_sample_size]
+    #         dataset = Subset(dataset, indices)
+    #     elif not train and self.test_sample_size is not None:
+    #         indices = torch.randperm(len(dataset))[:self.test_sample_size]
+    #         dataset = Subset(dataset, indices)
 
-        return DataLoader(dataset, 
-                          batch_size=self.batch_size, 
-                          shuffle=train, 
-                          num_workers=self.num_workers, 
-                          drop_last=not train, 
-                          pin_memory=True)
+    #     return DataLoader(dataset, 
+    #                       batch_size=self.batch_size, 
+    #                       shuffle=train, 
+    #                       num_workers=self.num_workers, 
+    #                       drop_last=not train, 
+    #                       pin_memory=True)
         
         
 
-    def prepare_data(self):
-        trainset = self.get_dataset(train=True)
-        testset = self.get_dataset(train=False) 
+    def prepare_data(self, DINO:bool = False):
+        # if not DINO: #Fine-tuning
+        #     trainset = self.get_dataset(train=True)
+        #     testset = self.get_dataset(train=False) 
+        #     trainloader = self.get_data_loader(trainset, train=True)
+        #     testloader = self.get_data_loader(testset, train=False)
 
-        trainloader = self.get_data_loader(trainset, train=True)
-        testloader = self.get_data_loader(testset, train=False)
+        #     classes = trainset.dataset.classes if isinstance(trainset, Subset) else trainset.classes
+        #     return trainloader, testloader, self.classes
+        # else:
+        #     trainset = self.get_dataset(train=True)
+        #     valset = self.get_dataset(train=False) 
+        #     trainloader = self.get_data_loader(trainset, train=True)
+        #     valloader = self.get_data_loader(valset, train=False)
+        
+        train_path = pathlib.Path('data/data_imagenette/train')
+        test_path = pathlib.Path('data/data_imagenette/val')
+        classes_path = pathlib.Path('data/data_imagnette/imagenette_labels.json')
+        
+        with classes_path.open('r') as f:
+            classes = json.load(f)
+        
+        
+#Create crops of input images
+class DataAugmentation:
+    def __init__(self,
+            global_crops_scale: tuple[float, float] =(0.4, 1), #40% or above for global 
+            local_crops_scale : tuple[float, float] = (0.05, 0.4), #40% or below for local
+            n_local_crops: int  = 8,
+            size: int = 224
+            ) -> None:
+        self.n_local_crops = n_local_crops
+        RandomGaussianBlur = lambda p: transforms.RandomApply([transforms.GaussianBlur(kernel_size=5, sigma=(0.1,2))], p=p)
+        #Mess with colors and axes
+        flip_and_jitter = transforms.Compose( 
+            [
+                transforms.RandomHorizontalFlip(p=0.5), #flip on y-axis
+                transforms.RandomApply(
+                    [
+                        transforms.ColorJitter(
+                            brightness=0.4,
+                            contrast=0.4,
+                            saturation=0.2,
+                            hue = 0.1
+                        ),
+                    ]
+                ),
+                transforms.RandomGrayscale(p=0.2)
+            ]
+        )
+        #Image normalization
+        normalize = transforms.Compose(
+            [
+                transforms.ToTensor(),
+                #(mean of channel(i)), (stdev of channel(i))
+                #Values of RGB are scaled to (original value - mean(i))/stdev(i)
+                transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
+            ]
+        )
 
-        classes = trainset.dataset.classes if isinstance(trainset, Subset) else trainset.classes
-        return trainloader, testloader, self.classes
+
+        self.global_1 = transforms.Compose(
+            [
+                transforms.RandomResizedCrop(
+                    size, #expected output size of crop
+                    scale = global_crops_scale, #upper and lower bounds for the crop area
+                    interpolation=Image.BICUBIC #Bicubic interpolation for approxamite pixel values
+                ),
+                flip_and_jitter,
+                RandomGaussianBlur(1.0), #always blur
+                normalize
+            ],
+        )
+
+        self.global_2 = transforms.Compose(
+            [
+                transforms.RandomResizedCrop(
+                    size, #expected output size of crop
+                    scale = global_crops_scale, #upper and lower bounds for the crop area
+                    interpolation=Image.BICUBIC #Bicubic interpolation for approxamite pixel values
+                ),
+                flip_and_jitter,
+                RandomGaussianBlur(0.1),
+                transforms.RandomSolarize(170, p = 0.2)
+                normalize
+            ],
+        )
+
+        self.local = transforms.Compose(
+            [
+                transforms.RandomResizedCrop(
+                    size, #expected output size of crop
+                    scale = local_crops_scale, #upper and lower bounds for the crop area
+                    interpolation=Image.BICUBIC #Bicubic interpolation for approxamite pixel values
+                ),
+                flip_and_jitter,
+                RandomGaussianBlur(0.5), #always blur
+                normalize
+            ],
+        )
+                
+                
+    def __call__(self, img):
+        #create empty list for all crops to reside
+        all_crops = []
+        #apply global crops to images and add to list
+        all_crops.append(self.global_1(img))
+        all_crops.append(self.global_2(img))
+        #apply local crops n times across image
+        all_crops.extend([self.local(img) for _ in range(self.n_local_crops)])
+        
+        return all_crops
+                

@@ -276,7 +276,10 @@ def main():
     save_model_every_n_epochs = SAVE_MODEL_EVERY
     # Load the dataset
     data_loader = DataHandler(batch_size=BATCH_SIZE, dataset_name= DATASET, num_workers=4, train_sample_size= None, test_sample_size = None)
-    trainloader, testloader, _ = data_loader.prepare_data()
+    #TODO it's no longer testing at this phase, alter it to validation
+    dino_loader_train, dino_loader_val, _ = data_loader.prepare_data(DINO = True)
+    trainloader, testloader, _ = data_loader.prepare_data(DINO = False)
+    
     # Create the model, optimizer, loss function and trainer
     student_model = ViT(img_size = IMAGE_SIZE,
                 patch_size= PATCH_SIZE,
