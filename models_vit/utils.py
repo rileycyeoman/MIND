@@ -12,6 +12,8 @@ with open('config.json', 'r') as json_file:
     config = json.load(json_file)
 CLASSES = config['DATA']['CLASSES']
 
+
+
 # Borrowing from https://github.com/lucidrains/linformer/blob/master/linformer/
 
 def default(val, default_val):
@@ -371,31 +373,38 @@ class DataHandler:
     #                       num_workers=self.num_workers, 
     #                       drop_last=not train, 
     #                       pin_memory=True)
-        
-        
+    
 
-    def prepare_data(self, DINO:bool = False):
-        # if not DINO: #Fine-tuning
-        #     trainset = self.get_dataset(train=True)
-        #     testset = self.get_dataset(train=False) 
-        #     trainloader = self.get_data_loader(trainset, train=True)
-        #     testloader = self.get_data_loader(testset, train=False)
-
-        #     classes = trainset.dataset.classes if isinstance(trainset, Subset) else trainset.classes
-        #     return trainloader, testloader, self.classes
-        # else:
-        #     trainset = self.get_dataset(train=True)
-        #     valset = self.get_dataset(train=False) 
-        #     trainloader = self.get_data_loader(trainset, train=True)
-        #     valloader = self.get_data_loader(valset, train=False)
+    def prepare_data(self):
         
-        train_path = pathlib.Path('data/data_imagenette/train')
-        test_path = pathlib.Path('data/data_imagenette/val')
+        
+        path_dataset_train = pathlib.Path("data/data_imagenette/train")
+        path_dataset_val = pathlib.Path("data/data_imagenette/val")
         classes_path = pathlib.Path('data/data_imagnette/imagenette_labels.json')
         
         with classes_path.open('r') as f:
             classes = json.load(f)
         
+        
+        
+        
+        
+        
+        transform_aug = DataAugmentation(size=224, n_local_crops = 2)
+        transform_plain = transforms.Compose(
+            [
+                transforms.ToTensor(),
+                transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
+                transforms.Resize((224, 224)),
+            ]
+        )
+
+        dataset_train_aug = nn.ImageFolder(path_dataset_train, transform=transform_aug)
+        dataset_train_plain = nn.ImageFolder(path_dataset_train, transform=transform_plain)
+        dataset_val_plain = nn.ImageFolder(path_dataset_val, transform=transform_plain)
+
+
+
         
 #Create crops of input images
 class DataAugmentation:
@@ -457,7 +466,7 @@ class DataAugmentation:
                 ),
                 flip_and_jitter,
                 RandomGaussianBlur(0.1),
-                transforms.RandomSolarize(170, p = 0.2)
+                transforms.RandomSolarize(170, p = 0.2),
                 normalize
             ],
         )
@@ -487,3 +496,47 @@ class DataAugmentation:
         
         return all_crops
                 
+
+#Connect heads to MLP network (may not be used #TODO)
+class Head(nn.Module):
+    def __init__(
+        self,
+        in_dim : int,
+        out_dim: int,
+        hidden_dim : int = 512,
+        bottleneck_dim : int = 256 ,
+        n_layers: int = 3,
+        norm_last_layer: bool = False
+    )-> None:
+        super().__init__()
+        if n_layers == 1:
+            self.mlp = nn.Linear(in_dim, bottleneck_dim)
+            
+        else:
+            layers = [nn.Linear(in_dim, bottleneck_dim)]
+            layers.append(nn.GELU)
+            for _ in range(n_layers - 2):
+                layers.append(nn.Linear(hidden_dim, hidden_dim))
+                layers.append(nn.GELU())
+            layers.append(nn.Linear(hidden_dim, bottleneck_dim))
+            self.mlp = nn.Sequential(*layers)
+            
+        self.apply(self._init_weights)
+        
+        self.last_layer = nn.utils.weight_norm(nn.Linear(bottleneck_dim, out_dim, bias=False)).weight_g.data.fill_(1)
+        
+        if norm_last_layer:
+            self.last_layer.weight_g.requires_grad = False
+        
+    def _init_weights(self, m):
+        if isinstance(m, nn.Linear):
+            nn.init(m.weight, std = 0.02)
+            if m.bias is not None:
+                nn.init.constant_(m.bias, 0)
+                
+                
+    def forward(self, x):
+        x = self.mlp(x)
+        x = nn.functional.normalize(x, dim = -1, p = 2)
+        return self.last_layer(x)
+    
