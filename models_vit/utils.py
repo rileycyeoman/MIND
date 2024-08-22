@@ -154,24 +154,92 @@ class LinformerSelfAttention(nn.Module):
 
 #DINO Utilities
 #Borrowing from jankrepl from overfitted https://github.com/jankrepl/mildlyoverfitted/blob/master/github_adventures/dino/utils.py
-class MultiCropWrapper(nn.Module):
-    def __init__(
-        self,
-        backbone,
-        new_head
-    ):
-        super().__init__()
-        backbone.head = nn.Identity()
-        self.backbone = backbone
-        self.new_head = new_head
+# class MultiCropWrapper(nn.Module):
+#     def __init__(
+#         self,
+#         backbone,
+#         head
+#     ):
+#         super(MultiCropWrapper, self).__init__()
+#         backbone.fc, backbone.head = nn.Identity(), nn.Identity()
+#         self.backbone = backbone
+#         self = head
         
-        def forward(self, x):
-            n_crops = len(x)
-            concat = torch.cat(x, dim = 0)
-            cls_embedding = self.backbone(concat)
-            logits = self.new_head(cls_embedding)
-            chunks = logits.chunk(n_crops)
-            return chunks
+#         def forward(self, x):
+            
+#             if not isinstance(x,list):
+#                 x = [x]
+#             idx_crops = torch.cumsum(torch.unique_consecutive(
+#                 torch.tensor([inp.shape[-1] for inp in x])
+#             )[1], 0)
+#             n_crops = len(x)
+#             concat = torch.cat(x, dim = 0)
+#             cls_embedding = self.backbone(concat)
+#             logits = self.new_head(cls_embedding)
+#             chunks = logits.chunk(n_crops)
+#             return chunks
+
+
+#Temporarily stealing from Meta
+class MultiCropWrapper(nn.Module):
+    """
+    Perform forward pass separately on each resolution input.
+    The inputs corresponding to a single resolution are clubbed and single
+    forward is run on the same resolution inputs. Hence we do several
+    forward passes = number of different resolutions used. We then
+    concatenate all the output features and run the head forward on these
+    concatenated features.
+    """
+    def __init__(self, backbone, head):
+        super(MultiCropWrapper, self).__init__()
+        # disable layers dedicated to ImageNet labels classification
+        backbone.fc, backbone.head = nn.Identity(), nn.Identity()
+        self.backbone = backbone
+        self.head = head
+
+    def forward(self, x):
+        # convert to list
+        if not isinstance(x, list):
+            x = [x]
+        idx_crops = torch.cumsum(torch.unique_consecutive(
+            torch.tensor([inp.shape[-1] for inp in x]),
+            return_counts=True,
+        )[1], 0)
+        start_idx, output = 0, torch.empty(0).to(x[0].device)
+        for end_idx in idx_crops:
+            _out = self.backbone(torch.cat(x[start_idx: end_idx]))
+            # The output is a tuple with XCiT model. See:
+            # https://github.com/facebookresearch/xcit/blob/master/xcit.py#L404-L405
+            if isinstance(_out, tuple):
+                _out = _out[0]
+            # accumulate outputs
+            output = torch.cat((output, _out))
+            start_idx = end_idx
+        # Run the head forward on the concatenated features.
+        return self.head(output)
+
+
+def get_params_groups(model):
+    regularized = []
+    not_regularized = []
+    for name, param in model.named_parameters():
+        if not param.requires_grad:
+            continue
+        # we do not regularize biases nor Norm parameters
+        if name.endswith(".bias") or len(param.shape) == 1:
+            not_regularized.append(param)
+        else:
+            regularized.append(param)
+    return [{'params': regularized}, {'params': not_regularized, 'weight_decay': 0.}]
+
+
+def has_batchnorms(model):
+    bn_types = (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d, nn.SyncBatchNorm)
+    for name, module in model.named_modules():
+        if isinstance(module, bn_types):
+            return True
+    return False
+
 
 class Loss(nn.Module):
     def __init__(
@@ -231,24 +299,6 @@ def clip_gradents(model, clip = 2.0):
                 p.grad.data.mul_(clip_coef)
 
 ###### Data Handling ######
-
-
-class TransformedSubset(torch.utils.data.Dataset):
-    def __init__(self, subset, transform=None):
-        super.__init__()
-        self.subset = subset
-        self.transform = transform
-        self.classes = subset.dataset.classes
-    def __getitem__(self, index):
-        x, y = self.subset[index]
-        if self.transform:
-            x = self.transform(x)
-        return x, y
-
-    def __len__(self):
-        return len(self.subset)
-
-
 class DataHandler:
     def __init__(self,
                 root_dir : str = './data',
@@ -279,101 +329,6 @@ class DataHandler:
         
         
     
-    
-    # def get_train_transform(self):
-    #     additional_transforms = [
-    #         transforms.RandomRotation(10),
-    #         transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.1),
-    #         transforms.RandomErasing(p=0.9, scale=(0.02, 0.2)),
-    #     ]
-
-    #     return transforms.Compose([
-    #         # transforms.Grayscale(num_output_channels= 1),
-    #         transforms.ToTensor(),
-    #         transforms.Resize((self.image_size, self.image_size), antialias=True),
-    #         transforms.RandomApply(additional_transforms, p=0.5),
-    #         transforms.RandomHorizontalFlip(p=0.5),
-    #         transforms.RandomResizedCrop((self.image_size, self.image_size), scale=(0.8, 1.0), ratio=(0.75, 1.3333333333333333), interpolation=2, antialias=True),
-    #         transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
-    #         # transforms.Normalize((0.5,) * 1, (0.5,) * 1)
-    #     ])
-        
-        
-        
-    # def get_test_transform(self):
-    #     return transforms.Compose([
-    #         transforms.ToTensor(),
-    #         transforms.Resize((self.image_size, self.image_size), antialias=True),
-    #         transforms.CenterCrop(self.image_size),
-    #         transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
-    #     ])
-
-
-    # def get_dataset(self, train=True):
-    #     # if self.dataset_name == 'CIFAR10':
-    #     #     dataset = torchvision.datasets.CIFAR10(root=self.root, train=train, download=self.download, transform=self.train_transform if train else self.test_transform)
-    #     # # Add more datasets as needed
-    #     # elif self.dataset_name == 'FER2013':
-    #     #     train_input = "/home/yeoman/research/train" 
-    #     #     test_input = "/home/yeoman/research/test"  
-    #     #     if train:
-    #     #         dataset = torchvision.datasets.ImageFolder(root=train_input, transform=self.train_transform)
-    #     #     else:
-    #     #         dataset = torchvision.datasets.ImageFolder(root=test_input, transform=self.test_transform)
-        
-        
-    #     # #TODO add imagenette as sole training dataset
-        
-    #     # elif self.dataset_name == 'NHF':
-            
-    #     #     train_input = '/home/yeoman/MIND/models_vit/data/train'
-    #     #     test_input = '/home/yeoman/MIND/models_vit/data/test'
-    #     #     if train:
-    #     #         dataset = torchvision.datasets.ImageFolder(root=train_input,
-    #     #                                                    transform=self.train_transform,
-    #     #                                                    target_transform=None)
-    #     #     else:
-    #     #         dataset = torchvision.datasets.ImageFolder(root=test_input,
-    #     #                                                    transform=self.test_transform)
-
-    #     if self.dataset_name == "imagenette":
-    #         train_path = pathlib.Path('data/data_imagenette/train')
-    #         test_path = pathlib.Path('data/data_imagenette/val')
-    #         class_path = pathlib.Path('data/data_imagnette/imagenette_labels.json')
-    #         if train: 
-    #             dataset = torchvision.datasets.ImageFolder(root=train_path,
-    #                                                        transform=self.train_transform,
-    #                                                        target_transform=None)
-    #         else:
-    #             dataset = torchvision.datasets.ImageFolder(root=test_path,
-    #                                                        transform=self.test_transform)
-    
-    #     else:
-    #         raise ValueError(f"Unsupported dataset: {self.dataset_name}")
-        
-    #     self.classes = dataset.classes
-    #     # print(self.classes)
-    #     # print(len(dataset))
-        
-    #     return dataset
-    
-    
-    
-    # def get_data_loader(self, dataset, train=True):
-    #     if train and self.train_sample_size is not None:
-    #         indices = torch.randperm(len(dataset))[:self.train_sample_size]
-    #         dataset = Subset(dataset, indices)
-    #     elif not train and self.test_sample_size is not None:
-    #         indices = torch.randperm(len(dataset))[:self.test_sample_size]
-    #         dataset = Subset(dataset, indices)
-
-    #     return DataLoader(dataset, 
-    #                       batch_size=self.batch_size, 
-    #                       shuffle=train, 
-    #                       num_workers=self.num_workers, 
-    #                       drop_last=not train, 
-    #                       pin_memory=True)
-    
 
     def prepare_data(self):
         
@@ -402,6 +357,37 @@ class DataHandler:
         dataset_train_aug = nn.ImageFolder(path_dataset_train, transform=transform_aug)
         dataset_train_plain = nn.ImageFolder(path_dataset_train, transform=transform_plain)
         dataset_val_plain = nn.ImageFolder(path_dataset_val, transform=transform_plain)
+        
+        aug_loader = DataLoader(
+        dataset_train_aug,
+        batch_size= 32,
+        shuffle=True,
+        drop_last=True,
+        num_workers= 4,
+        pin_memory=True,
+        )
+        train_loader = DataLoader(
+            dataset_train_plain,
+            batch_size= 32,
+            drop_last= False,
+            num_workers= 4,
+        )
+        val_loader = DataLoader(
+            dataset_val_plain,
+            batch_size = 32,
+            drop_last = False,
+            num_workers = 4,
+        )
+        
+        val_subset_loader = DataLoader( #TODO find out what this does
+            dataset_val_plain,
+            batch_size= 32,
+            drop_last = False,
+            sampler = nn.utils.SubsetRandomSampler(list(range(0, len(dataset_val_plain), 50))),
+            num_workers = 4,
+        )
+        
+        return train_loader, aug_loader, val_loader
 
 
 

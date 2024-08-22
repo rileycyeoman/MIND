@@ -4,7 +4,8 @@ import torch.utils
 import json, os, time
 from torch.nn import functional as F
 from torch import optim
-from ViTransformer import ViT
+from ViTransformer import ViT, DINOHead
+import utils
 from utils import DataHandler
 with open('config.json', 'r') as json_file:
     config = json.load(json_file)
@@ -25,6 +26,7 @@ EPOCHS = int(config['PARAMETERS']['epochs'])
 LR = float(config['PARAMETERS']['lr'])
 SAVE_MODEL_EVERY = int(config['PARAMETERS']['save_model_every'])
 DATASET =  config['PARAMETERS']['dataset_name']
+OUT_DIM = config['PARAMETERS']['out_dim']
 # Make the output satisfying
 class TextColors:
     BLACK = "\033[0;30m"
@@ -205,9 +207,11 @@ class Trainer:
             # Zero the gradients
             self.optimizer.zero_grad()
             # Calculate the loss
-            logits = self.classifier(self.student_model(images))
+            # logits = self.classifier(self.student_model(images))
+            student_output = self.student_model(images)
+            teacher_output = self.teacher_model(images[:2]) #TODO ????
             # logits = self.classifier(self.model.get_intermediate_layers(images))
-            loss = self.loss_fn(logits, labels)
+            loss = self.loss_fn(student_output, teacher_output)
             # Backpropagate the loss
             loss.backward()
             # Update the model's parameters
@@ -277,8 +281,7 @@ def main():
     # Load the dataset
     data_loader = DataHandler(batch_size=BATCH_SIZE, dataset_name= DATASET, num_workers=4, train_sample_size= None, test_sample_size = None)
     #TODO it's no longer testing at this phase, alter it to validation
-    dino_loader_train, dino_loader_val, _ = data_loader.prepare_data()
-    trainloader, valloader, unsuploader = data_loader.prepare_data() 
+    train_loader, aug_loader, val_loader = data_loader.prepare_data() 
     
     # Create the model, optimizer, loss function and trainer
     student_model = ViT(img_size = IMAGE_SIZE,
@@ -293,13 +296,32 @@ def main():
                 embed_dim= HIDDEN_SIZE)
     for p in teacher_model.parameters():
         p.requires_grad = False
+        
+    student = utils.MultiCropWrapper(student_model, DINOHead(
+        HIDDEN_SIZE,
+        OUT_DIM     
+    ))
+    teacher = utils.MultiCropWrapper(teacher_model, DINOHead(
+        HIDDEN_SIZE,
+        OUT_DIM     
+    ))
+    student.cuda()
+    teacher.cuda()
+    for p in teacher.parameters():
+        p.requires_grad = False
+    
+    dino_loss = utils.Loss(
+        out_dim=OUT_DIM,
+        teacher_temp = 0.04, #TODO turn to configs
+        student_temp=0.1
+    ).cuda()
     # classifier = nn.Linear(HIDDEN_SIZE, NUM_CLASSES)
     classifier = LinearClassifier(HIDDEN_SIZE, num_labels = NUM_CLASSES)
     optimizer = optim.AdamW(list(student_model.parameters()) + list(classifier.parameters()), lr=LR, weight_decay=1e-2)
     # optimizer = optim.SGD(model.parameters(), lr = LR, weight_decay = 1e-2, momentum = 0.9)
-    loss_fn = nn.CrossEntropyLoss()
+    # loss_fn = nn.CrossEntropyLoss()
     
-    trainer = Trainer(student_model, teacher_model, optimizer, classifier, loss_fn, EXP_NAME, device=device)
+    trainer = Trainer(student_model, teacher_model, optimizer, classifier, dino_loss, EXP_NAME, device=device)
     print("==============MIND DINO Phase==============")
     # trainer.pretrain(pretrainloader, PRETRAIN_EPOCHS, save_model_every_n_epochs=save_model_every_n_epochs)
     print("==============Training MIND==============")
