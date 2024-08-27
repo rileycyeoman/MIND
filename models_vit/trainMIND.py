@@ -1,11 +1,14 @@
 import torch
 from torch import nn
-import torch.utils
+from torch.utils import DataLoader, Subset
 import json, os, time
 from torch.nn import functional as F
 from torch import optim
+from torchvision import transforms
 from ViTransformer import ViT, DINOHead
 import utils
+import pathlib
+import tqdm
 from utils import DataHandler
 with open('config.json', 'r') as json_file:
     config = json.load(json_file)
@@ -55,62 +58,10 @@ class TextColors:
     ENDC = "\033[0m"
 
         
-def save_experiment(experiment_name, config, model, train_losses, test_losses, accuracies, base_dir="experiments"):
-    outdir = os.path.join(base_dir, experiment_name)
-    os.makedirs(outdir, exist_ok=True)
 
-    # Save the config
-    configfile = os.path.join(outdir, 'config.json')
-    with open(configfile, 'w') as f:
-        json.dump(config, f, sort_keys=True, indent=4)
-
-    # Save the metrics
-    jsonfile = os.path.join(outdir, 'metrics.json')
-    with open(jsonfile, 'w') as f:
-        data = {
-            'train_losses': train_losses,
-            'test_losses': test_losses,
-            'accuracies': accuracies,
-        }
-        json.dump(data, f, sort_keys=True, indent=4)
-
-    # Save the model
-    save_checkpoint(experiment_name, model, "final", base_dir=base_dir)
-
-
-def save_checkpoint(experiment_name, model, epoch, base_dir="experiments"):
-    outdir = os.path.join(base_dir, experiment_name)
-    os.makedirs(outdir, exist_ok=True)
-    copyfile = os.path.join(outdir, f'model_{epoch}.pt')
-    torch.save(model.state_dict(), copyfile)
-
-
-def load_experiment(experiment_name, checkpoint_name="model_final.pt", base_dir="experiments"):
-    outdir = os.path.join(base_dir, experiment_name)
-    # Load the config
-    configfile = os.path.join(outdir, 'config.json')
-    with open(configfile, 'r') as f:
-        config = json.load(f)
-    # Load the metrics
-    jsonfile = os.path.join(outdir, 'metrics.json')
-    with open(jsonfile, 'r') as f:
-        data = json.load(f)
-    train_losses = data['train_losses']
-    test_losses = data['test_losses']
-    accuracies = data['accuracies']
-    # Load the model
-    model = ViT()
-    copyfile = os.path.join(outdir, checkpoint_name)
-    model.load_state_dict(torch.load(copyfile))
-    return config, model, train_losses, test_losses, accuracies
-
-
-
-        
         
         
     
-        
 
 
 # from torch import nn, optim
@@ -145,10 +96,7 @@ class Trainer:
         for epoch in range(epochs):
             pretrain_loss, pretrain_accuracy = self.train_epoch(pretrainloader)
             print(f"Pretrain Epoch: {epoch+1}, Loss: {pretrain_loss:.4f}, Accuracy: {pretrain_accuracy:.4f}")
-            if save_model_every_n_epochs > 0 and (epoch+1) % save_model_every_n_epochs == 0 and epoch+1 != epochs:
-                print('\tSave pretrain checkpoint at epoch', epoch+1)
-                save_checkpoint(self.exp_name + '_pretrain', self.student_model, epoch+1)
-        save_checkpoint(self.exp_name + '_pretrain_final', self.student_model, epochs)
+            
 
     
 
@@ -159,26 +107,28 @@ class Trainer:
         for epoch in range(epochs):
             finetune_loss, finetune_accuracy = self.train_epoch(finetuneloader)
             print(f"Fine-tune Epoch: {epoch+1}, Loss: {finetune_loss:.4f}, Accuracy: {finetune_accuracy:.4f}")
-            if save_model_every_n_epochs > 0 and (epoch+1) % save_model_every_n_epochs == 0 and epoch+1 != epochs:
-                print('\tSave finetune checkpoint at epoch', epoch+1)
-                save_checkpoint(self.exp_name + '_finetune', self.student_model, epoch+1)
-        save_checkpoint(self.exp_name + '_finetune_final', self.student_model, epochs)
+
     
         
-    def train(self, trainloader, testloader, epochs, save_model_every_n_epochs=0):
+    def train(self, trainloader, augloader, epochs, dataset_train_aug):
         """
         Train the model for the specified number of epochs.
         """
         # Keep track of the losses and accuracies
         train_losses, test_losses, accuracies = [], [], []
         t0 = time.time()
+        n_steps = 0
+        num_batches = len(dataset_train_aug) // BATCH_SIZE
         # Train the model
         for i in range(epochs):
-            train_loss, train_accuracy = self.train_epoch(trainloader)
-            test_accuracy, test_loss = self.evaluate(testloader)
-            train_losses.append(train_loss)
-            test_losses.append(test_loss)
-            accuracies.append(train_accuracy)
+            for j, (images, _) in tqdm.tqdm(enumerate(augloader), total=BATCH_SIZE) 
+            
+            
+            # train_loss, train_accuracy = self.train_epoch(trainloader)
+            # test_accuracy, test_loss = self.evaluate(testloader)
+            # train_losses.append(train_loss)
+            # test_losses.append(test_loss)
+            # accuracies.append(train_accuracy)
             t1 = time.time()
             print(f"{TextColors.LIGHT_BLUE}Epoch:{TextColors.ENDC} {i+1}") 
             print(f"{TextColors.BLUE}Train loss:{TextColors.ENDC} {train_loss:.4f}")
@@ -186,42 +136,39 @@ class Trainer:
             print(f"{TextColors.GREEN}Accuracy:{TextColors.ENDC} {test_accuracy:.4f}\n")
             print(f"Time Elapsed from Last Epoch: {t1 - t0}")
             t0 = t1
-            if save_model_every_n_epochs > 0 and (i+1) % save_model_every_n_epochs == 0 and i+1 != epochs:
-                print('\tSave checkpoint at epoch', i+1)
-                save_checkpoint(self.exp_name, self.student_model, i+1)
-        # Save the experiment
-        save_experiment(self.exp_name, config, self.student_model, train_losses, test_losses, accuracies)
+            #TODO ADD VISUALIZATION STEP HERE
+        
 
-    def train_epoch(self, trainloader):
-        """
-        Train the model for one epoch.
-        """
-        self.student_model.train()
-        self.classifier.train()
-        total_loss = 0
-        correct = 0
-        for batch in trainloader:
-            # Move the batch to the device
-            batch = [t.to(self.device) for t in batch]
-            images, labels = batch
-            # Zero the gradients
-            self.optimizer.zero_grad()
-            # Calculate the loss
-            # logits = self.classifier(self.student_model(images))
-            student_output = self.student_model(images)
-            teacher_output = self.teacher_model(images[:2]) #TODO ????
-            # logits = self.classifier(self.model.get_intermediate_layers(images))
-            loss = self.loss_fn(student_output, teacher_output)
-            # Backpropagate the loss
-            loss.backward()
-            # Update the model's parameters
-            self.optimizer.step()
-            total_loss += loss.item() * len(images)
-            # Calculate the number of correct predictions
-            predictions = torch.argmax(logits, dim=1)
-            correct += torch.sum(predictions == labels).item()
-        accuracy = correct / len(trainloader.dataset)
-        return total_loss / len(trainloader.dataset), accuracy
+    # def train_epoch(self, trainloader):
+    #     """
+    #     Train the model for one epoch.
+    #     """
+    #     self.student_model.train()
+    #     self.classifier.train()
+    #     total_loss = 0
+    #     correct = 0
+    #     for batch in trainloader:
+    #         # Move the batch to the device
+    #         batch = [t.to(self.device) for t in batch]
+    #         images, labels = batch
+    #         # Zero the gradients
+    #         self.optimizer.zero_grad()
+    #         # Calculate the loss
+    #         # logits = self.classifier(self.student_model(images))
+    #         student_logits = self.student_model(images)
+    #         teacher_logits = self.teacher_model(images[:2]) #TODO ????
+    #         # logits = self.classifier(self.model.get_intermediate_layers(images))
+    #         loss = self.loss_fn(student_logits, teacher_logits)
+    #         # Backpropagate the loss
+    #         loss.backward()
+    #         # Update the model's parameters
+    #         self.optimizer.step()
+    #         total_loss += loss.item() * len(images)
+    #         # Calculate the number of correct predictions
+    #         predictions = torch.argmax(logits, dim=1)
+    #         correct += torch.sum(predictions == labels).item()
+    #     accuracy = correct / len(trainloader.dataset)
+    #     return total_loss / len(trainloader.dataset), accuracy
 
     @torch.no_grad()
     def evaluate(self, testloader):
@@ -279,9 +226,62 @@ def main():
     # Training parameters
     save_model_every_n_epochs = SAVE_MODEL_EVERY
     # Load the dataset
-    data_loader = DataHandler(batch_size=BATCH_SIZE, dataset_name= DATASET, num_workers=4, train_sample_size= None, test_sample_size = None)
-    #TODO it's no longer testing at this phase, alter it to validation
-    train_loader, aug_loader, val_loader = data_loader.prepare_data() 
+    
+    path_dataset_train = pathlib.Path("data/data_imagenette/train")
+    path_dataset_val = pathlib.Path("data/data_imagenette/val")
+    classes_path = pathlib.Path('data/data_imagnette/imagenette_labels.json')
+    
+    with classes_path.open('r') as f:
+        classes = json.load(f)
+    
+    
+    
+    
+    
+    
+    transform_aug = utils.DataAugmentation(size=224, n_local_crops = 2)
+    transform_plain = transforms.Compose(
+        [
+            transforms.ToTensor(),
+            transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
+            transforms.Resize((224, 224)),
+        ]
+    )
+
+    dataset_train_aug = nn.ImageFolder(path_dataset_train, transform=transform_aug)
+    dataset_train_plain = nn.ImageFolder(path_dataset_train, transform=transform_plain)
+    dataset_val_plain = nn.ImageFolder(path_dataset_val, transform=transform_plain)
+    
+    aug_loader = DataLoader(
+        dataset_train_aug,
+        batch_size= 32,
+        shuffle=True,
+        drop_last=True,
+        num_workers= 4,
+        pin_memory=True,
+    )
+    train_loader = DataLoader(
+        dataset_train_plain,
+        batch_size= 32,
+        drop_last= False,
+        num_workers= 4,
+    )
+    val_loader = DataLoader(
+        dataset_val_plain,
+        batch_size = 32,
+        drop_last = False,
+        num_workers = 4,
+    )
+    
+    val_subset_loader = DataLoader( #TODO find out what this does
+        dataset_val_plain,
+        batch_size= 32,
+        drop_last = False,
+        sampler = nn.utils.SubsetRandomSampler(list(range(0, len(dataset_val_plain), 50))),
+        num_workers = 4,
+    )
+
+   
     
     # Create the model, optimizer, loss function and trainer
     student_model = ViT(img_size = IMAGE_SIZE,

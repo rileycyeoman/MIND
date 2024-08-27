@@ -3,7 +3,6 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, Subset
-import torchvision
 import json
 from PIL import Image
 import pathlib
@@ -154,69 +153,69 @@ class LinformerSelfAttention(nn.Module):
 
 #DINO Utilities
 #Borrowing from jankrepl from overfitted https://github.com/jankrepl/mildlyoverfitted/blob/master/github_adventures/dino/utils.py
-# class MultiCropWrapper(nn.Module):
-#     def __init__(
-#         self,
-#         backbone,
-#         head
-#     ):
-#         super(MultiCropWrapper, self).__init__()
-#         backbone.fc, backbone.head = nn.Identity(), nn.Identity()
-#         self.backbone = backbone
-#         self = head
-        
-#         def forward(self, x):
-            
-#             if not isinstance(x,list):
-#                 x = [x]
-#             idx_crops = torch.cumsum(torch.unique_consecutive(
-#                 torch.tensor([inp.shape[-1] for inp in x])
-#             )[1], 0)
-#             n_crops = len(x)
-#             concat = torch.cat(x, dim = 0)
-#             cls_embedding = self.backbone(concat)
-#             logits = self.new_head(cls_embedding)
-#             chunks = logits.chunk(n_crops)
-#             return chunks
-
-
-#Temporarily stealing from Meta
 class MultiCropWrapper(nn.Module):
-    """
-    Perform forward pass separately on each resolution input.
-    The inputs corresponding to a single resolution are clubbed and single
-    forward is run on the same resolution inputs. Hence we do several
-    forward passes = number of different resolutions used. We then
-    concatenate all the output features and run the head forward on these
-    concatenated features.
-    """
-    def __init__(self, backbone, head):
+    def __init__(
+        self,
+        backbone,
+        head
+    ):
         super(MultiCropWrapper, self).__init__()
-        # disable layers dedicated to ImageNet labels classification
         backbone.fc, backbone.head = nn.Identity(), nn.Identity()
         self.backbone = backbone
-        self.head = head
+        self = head
+        
+        def forward(self, x):
+            
+            if not isinstance(x,list):
+                x = [x]
+            idx_crops = torch.cumsum(torch.unique_consecutive(
+                torch.tensor([inp.shape[-1] for inp in x])
+            )[1], 0)
+            n_crops = len(x)
+            concat = torch.cat(x, dim = 0)
+            cls_embedding = self.backbone(concat)
+            logits = self.new_head(cls_embedding)
+            chunks = logits.chunk(n_crops)
+            return chunks
 
-    def forward(self, x):
-        # convert to list
-        if not isinstance(x, list):
-            x = [x]
-        idx_crops = torch.cumsum(torch.unique_consecutive(
-            torch.tensor([inp.shape[-1] for inp in x]),
-            return_counts=True,
-        )[1], 0)
-        start_idx, output = 0, torch.empty(0).to(x[0].device)
-        for end_idx in idx_crops:
-            _out = self.backbone(torch.cat(x[start_idx: end_idx]))
-            # The output is a tuple with XCiT model. See:
-            # https://github.com/facebookresearch/xcit/blob/master/xcit.py#L404-L405
-            if isinstance(_out, tuple):
-                _out = _out[0]
-            # accumulate outputs
-            output = torch.cat((output, _out))
-            start_idx = end_idx
-        # Run the head forward on the concatenated features.
-        return self.head(output)
+
+# #Temporarily stealing from Meta
+# class MultiCropWrapper(nn.Module):
+#     """
+#     Perform forward pass separately on each resolution input.
+#     The inputs corresponding to a single resolution are clubbed and single
+#     forward is run on the same resolution inputs. Hence we do several
+#     forward passes = number of different resolutions used. We then
+#     concatenate all the output features and run the head forward on these
+#     concatenated features.
+#     """
+#     def __init__(self, backbone, head):
+#         super(MultiCropWrapper, self).__init__()
+#         # disable layers dedicated to ImageNet labels classification
+#         backbone.fc, backbone.head = nn.Identity(), nn.Identity()
+#         self.backbone = backbone
+#         self.head = head
+
+#     def forward(self, x):
+#         # convert to list
+#         if not isinstance(x, list):
+#             x = [x]
+#         idx_crops = torch.cumsum(torch.unique_consecutive(
+#             torch.tensor([inp.shape[-1] for inp in x]),
+#             return_counts=True,
+#         )[1], 0)
+#         start_idx, output = 0, torch.empty(0).to(x[0].device)
+#         for end_idx in idx_crops:
+#             _out = self.backbone(torch.cat(x[start_idx: end_idx]))
+#             # The output is a tuple with XCiT model. See:
+#             # https://github.com/facebookresearch/xcit/blob/master/xcit.py#L404-L405
+#             if isinstance(_out, tuple):
+#                 _out = _out[0]
+#             # accumulate outputs
+#             output = torch.cat((output, _out))
+#             start_idx = end_idx
+#         # Run the head forward on the concatenated features.
+#         return self.head(output)
 
 
 def get_params_groups(model):
