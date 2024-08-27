@@ -9,6 +9,7 @@ from ViTransformer import ViT, DINOHead
 import utils
 import pathlib
 import tqdm
+from evaluate import compute_embedding, compute_knn
 from utils import DataHandler
 with open('config.json', 'r') as json_file:
     config = json.load(json_file)
@@ -64,7 +65,7 @@ class TextColors:
     
 
 
-# from torch import nn, optim
+
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 print(f"Using the {TextColors.PURPLE}{torch.cuda.get_device_name(0)}{TextColors.ENDC} for training.")
 # These are not hard constraints, but are used to prevent misconfigurations
@@ -110,7 +111,20 @@ class Trainer:
 
     
         
-    def train(self, trainloader, augloader, epochs, dataset_train_aug):
+    def train(self, 
+              trainloader,
+              valloader, 
+              augloader, 
+              epochs, 
+              dataset_train_aug, 
+              student, 
+              teacher, 
+              data_loader_val_plain_subset,
+              optimizer,
+              loss_fn,
+              teacher_momentum,
+              student_momentum,
+              ):
         """
         Train the model for the specified number of epochs.
         """
@@ -118,12 +132,47 @@ class Trainer:
         train_losses, test_losses, accuracies = [], [], []
         t0 = time.time()
         n_steps = 0
+        best_acc = 0
         num_batches = len(dataset_train_aug) // BATCH_SIZE
         # Train the model
         for i in range(epochs):
-            for j, (images, _) in tqdm.tqdm(enumerate(augloader), total=BATCH_SIZE) 
+            for j, (images, _) in tqdm.tqdm(enumerate(augloader), total=num_batches):
+                student.eval()
+                embs, imgs, labels_ = compute_embedding(
+                    student.backbone,
+                    data_loader_val_plain_subset
+                )
+
+                
+                curr_acc = compute_knn(
+                    student.backbone,
+                    trainloader,
+                    valloader,
+                )
+                if curr_acc > best_acc:
+                    best_acc = curr_acc
+                
+                student.train()
             
-            
+                images = [img.to(device) for img in images]
+                student_logits = student(images)
+                teacher_logits = teacher(images[:2])
+                loss = loss_fn(student_logits, teacher_logits)
+                optimizer.zero_grad()
+                loss.backward()
+                utils.clip_gradients(student)
+                optimizer.step()
+
+                with torch.no_grad():
+                    for student_ps, teacher_ps in zip(
+                        student.parameters(), teacher.parameters()
+                    ):
+                        teacher_ps.data.mul_(teacher_momentum)
+                        teacher_ps.data.add_(
+                            (1 - teacher_momentum) * (student_ps.detach()).data
+                        )
+                n_steps += 1
+                
             # train_loss, train_accuracy = self.train_epoch(trainloader)
             # test_accuracy, test_loss = self.evaluate(testloader)
             # train_losses.append(train_loss)
