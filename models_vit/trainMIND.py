@@ -1,16 +1,16 @@
 import torch
 from torch import nn
-from torch.utils import DataLoader, Subset
-import json, os, time
+from dataclasses import dataclass
+import json, time
 from torch.nn import functional as F
 from torch import optim
-from torchvision import transforms
+from torch.utils.data import DataLoader, SubsetRandomSampler
+from torchvision import transforms, datasets
 from ViTransformer import ViT, DINOHead
 import utils
 import pathlib
 import tqdm
 from evaluate import compute_embedding, compute_knn
-from utils import DataHandler
 with open('config.json', 'r') as json_file:
     config = json.load(json_file)
     
@@ -74,21 +74,22 @@ assert INTERMEDIATE_SIZE == 4 * HIDDEN_SIZE, "The intermediate size is not 4 tim
 assert IMAGE_SIZE % PATCH_SIZE == 0, "Image size is not divisible by patch size"
 
 
-
+@dataclass
 class Trainer:
     """
     The simple trainer.
     """
-
-    def __init__(self, student_model, teacher_model, optimizer, classifier, loss_fn, exp_name, device):
-        self.student_model = student_model.to(device)
-        self.teacher_model = teacher_model.to(device)
-        self.optimizer = optimizer
-        self.classifier = classifier.to(device)
-        self.loss_fn = loss_fn
-        self.exp_name = exp_name
-        self.device = device
-        
+    trainloader: any
+    valloader: any
+    augloader: any
+    dataset_train_aug: any
+    student: any
+    teacher: any
+    device: any
+    valsubset: any
+    optimizer: any
+    loss_fn: any
+    teacher_momentum: float
         
     def pretrain(self, pretrainloader, epochs, save_model_every_n_epochs=0):
         """
@@ -111,20 +112,7 @@ class Trainer:
 
     
         
-    def train(self, 
-              trainloader,
-              valloader, 
-              augloader, 
-              epochs, 
-              dataset_train_aug, 
-              student, 
-              teacher, 
-              data_loader_val_plain_subset,
-              optimizer,
-              loss_fn,
-              teacher_momentum,
-              student_momentum,
-              ):
+    def train(self):
         """
         Train the model for the specified number of epochs.
         """
@@ -133,43 +121,42 @@ class Trainer:
         t0 = time.time()
         n_steps = 0
         best_acc = 0
-        num_batches = len(dataset_train_aug) // BATCH_SIZE
+        num_batches = len(self.dataset_train_aug) // BATCH_SIZE
         # Train the model
-        for i in range(epochs):
-            for j, (images, _) in tqdm.tqdm(enumerate(augloader), total=num_batches):
-                student.eval()
+        for i in range(EPOCHS):
+            for j, (images, _) in tqdm.tqdm(enumerate(self.augloader), total=num_batches):
+                self.student.eval()
                 embs, imgs, labels_ = compute_embedding(
-                    student.backbone,
-                    data_loader_val_plain_subset
+                    self.student.backbone,
+                    self.valsubset
                 )
 
-                
                 curr_acc = compute_knn(
-                    student.backbone,
-                    trainloader,
-                    valloader,
+                    self.student.backbone,
+                    self.trainloader,
+                    self.valloader,
                 )
                 if curr_acc > best_acc:
                     best_acc = curr_acc
                 
-                student.train()
+                self.student.train()
             
                 images = [img.to(device) for img in images]
-                student_logits = student(images)
-                teacher_logits = teacher(images[:2])
-                loss = loss_fn(student_logits, teacher_logits)
-                optimizer.zero_grad()
+                student_logits = self.student(images)
+                teacher_logits = self.teacher(images[:2])
+                loss = self.loss_fn(student_logits, teacher_logits)
+                self.optimizer.zero_grad()
                 loss.backward()
-                utils.clip_gradients(student)
-                optimizer.step()
+                utils.clip_gradients(self.student)
+                self.optimizer.step()
 
                 with torch.no_grad():
                     for student_ps, teacher_ps in zip(
-                        student.parameters(), teacher.parameters()
+                        self.student.parameters(), self.teacher.parameters()
                     ):
-                        teacher_ps.data.mul_(teacher_momentum)
+                        teacher_ps.data.mul_(self.teacher_momentum)
                         teacher_ps.data.add_(
-                            (1 - teacher_momentum) * (student_ps.detach()).data
+                            (1 - self.teacher_momentum) * (student_ps.detach()).data
                         )
                 n_steps += 1
                 
@@ -278,7 +265,7 @@ def main():
     
     path_dataset_train = pathlib.Path("data/data_imagenette/train")
     path_dataset_val = pathlib.Path("data/data_imagenette/val")
-    classes_path = pathlib.Path('data/data_imagnette/imagenette_labels.json')
+    classes_path = pathlib.Path('data/data_imagenette/imagenette_labels.json')
     
     with classes_path.open('r') as f:
         classes = json.load(f)
@@ -297,9 +284,9 @@ def main():
         ]
     )
 
-    dataset_train_aug = nn.ImageFolder(path_dataset_train, transform=transform_aug)
-    dataset_train_plain = nn.ImageFolder(path_dataset_train, transform=transform_plain)
-    dataset_val_plain = nn.ImageFolder(path_dataset_val, transform=transform_plain)
+    dataset_train_aug = datasets.ImageFolder(path_dataset_train, transform=transform_aug)
+    dataset_train_plain = datasets.ImageFolder(path_dataset_train, transform=transform_plain)
+    dataset_val_plain = datasets.ImageFolder(path_dataset_val, transform=transform_plain)
     
     aug_loader = DataLoader(
         dataset_train_aug,
@@ -326,7 +313,7 @@ def main():
         dataset_val_plain,
         batch_size= 32,
         drop_last = False,
-        sampler = nn.utils.SubsetRandomSampler(list(range(0, len(dataset_val_plain), 50))),
+        sampler = SubsetRandomSampler(list(range(0, len(dataset_val_plain), 50))),
         num_workers = 4,
     )
 
@@ -364,17 +351,30 @@ def main():
         teacher_temp = 0.04, #TODO turn to configs
         student_temp=0.1
     ).cuda()
+    teacher_momentum = 0.995 #TODO CONFIG
     # classifier = nn.Linear(HIDDEN_SIZE, NUM_CLASSES)
     classifier = LinearClassifier(HIDDEN_SIZE, num_labels = NUM_CLASSES)
     optimizer = optim.AdamW(list(student_model.parameters()) + list(classifier.parameters()), lr=LR, weight_decay=1e-2)
     # optimizer = optim.SGD(model.parameters(), lr = LR, weight_decay = 1e-2, momentum = 0.9)
     # loss_fn = nn.CrossEntropyLoss()
     
-    trainer = Trainer(student_model, teacher_model, optimizer, classifier, dino_loss, EXP_NAME, device=device)
+    trainer = Trainer(
+    trainloader=train_loader,
+    valloader=val_loader,
+    augloader=aug_loader,
+    dataset_train_aug=dataset_train_aug,
+    student=student,
+    teacher=teacher,
+    device=device,
+    valsubset=val_subset_loader,
+    optimizer=optimizer,
+    loss_fn=dino_loss,
+    teacher_momentum=teacher_momentum
+    )
     print("==============MIND DINO Phase==============")
     # trainer.pretrain(pretrainloader, PRETRAIN_EPOCHS, save_model_every_n_epochs=save_model_every_n_epochs)
     print("==============Training MIND==============")
-    trainer.train(trainloader, testloader, EPOCHS, save_model_every_n_epochs=save_model_every_n_epochs)
+    trainer.train()
     print("==============Validating MIND==============")
     # trainer.finetune(finetuneloader, FINETUNE_EPOCHS, save_model_every_n_epochs=save_model_every_n_epochs)
     print("==============Training done==============")
