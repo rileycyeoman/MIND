@@ -18,7 +18,7 @@ def compute_knn(backbone, data_loader_train, data_loader_val):
         "y_val": [],
     } 
     
-    for name, data_loader in data_loader.items():
+    for name, data_loader in data_loaders.items():
         for imgs, y in data_loader:
             imgs = imgs.to(device)
             data[f"X_{name}"].append(backbone(imgs).detach().cpu().numpy())

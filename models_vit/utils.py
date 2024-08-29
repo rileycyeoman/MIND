@@ -1,16 +1,18 @@
 import math
 import torch
 from torch import nn
+import torch.distributed
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, Subset
 import json
 from PIL import Image
 import pathlib
+import numpy as np
 from torchvision import transforms
 with open('config.json', 'r') as json_file:
     config = json.load(json_file)
 CLASSES = config['DATA']['CLASSES']
-
+EPOCHS = int(config['PARAMETERS']['epochs'])
 
 
 # Borrowing from https://github.com/lucidrains/linformer/blob/master/linformer/
@@ -151,71 +153,45 @@ class LinformerSelfAttention(nn.Module):
         return self.to_out(out)
 
 
-#DINO Utilities
-#Borrowing from jankrepl from overfitted https://github.com/jankrepl/mildlyoverfitted/blob/master/github_adventures/dino/utils.py
-class MultiCropWrapper(nn.Module):
-    def __init__(
-        self,
-        backbone,
-        head
-    ):
-        super(MultiCropWrapper, self).__init__()
-        backbone.fc, backbone.head = nn.Identity(), nn.Identity()
-        self.backbone = backbone
-        self = head
-        
-        def forward(self, x):
-            
-            if not isinstance(x,list):
-                x = [x]
-            idx_crops = torch.cumsum(torch.unique_consecutive(
-                torch.tensor([inp.shape[-1] for inp in x])
-            )[1], 0)
-            n_crops = len(x)
-            concat = torch.cat(x, dim = 0)
-            cls_embedding = self.backbone(concat)
-            logits = self.new_head(cls_embedding)
-            chunks = logits.chunk(n_crops)
-            return chunks
-
+#DINO utilities
 
 # #Temporarily stealing from Meta
-# class MultiCropWrapper(nn.Module):
-#     """
-#     Perform forward pass separately on each resolution input.
-#     The inputs corresponding to a single resolution are clubbed and single
-#     forward is run on the same resolution inputs. Hence we do several
-#     forward passes = number of different resolutions used. We then
-#     concatenate all the output features and run the head forward on these
-#     concatenated features.
-#     """
-#     def __init__(self, backbone, head):
-#         super(MultiCropWrapper, self).__init__()
-#         # disable layers dedicated to ImageNet labels classification
-#         backbone.fc, backbone.head = nn.Identity(), nn.Identity()
-#         self.backbone = backbone
-#         self.head = head
+class MultiCropWrapper(nn.Module):
+    """
+    Perform forward pass separately on each resolution input.
+    The inputs corresponding to a single resolution are clubbed and single
+    forward is run on the same resolution inputs. Hence we do several
+    forward passes = number of different resolutions used. We then
+    concatenate all the output features and run the head forward on these
+    concatenated features.
+    """
+    def __init__(self, backbone, head):
+        super(MultiCropWrapper, self).__init__()
+        # disable layers dedicated to ImageNet labels classification
+        backbone.fc, backbone.head = nn.Identity(), nn.Identity()
+        self.backbone = backbone
+        self.head = head
 
-#     def forward(self, x):
-#         # convert to list
-#         if not isinstance(x, list):
-#             x = [x]
-#         idx_crops = torch.cumsum(torch.unique_consecutive(
-#             torch.tensor([inp.shape[-1] for inp in x]),
-#             return_counts=True,
-#         )[1], 0)
-#         start_idx, output = 0, torch.empty(0).to(x[0].device)
-#         for end_idx in idx_crops:
-#             _out = self.backbone(torch.cat(x[start_idx: end_idx]))
-#             # The output is a tuple with XCiT model. See:
-#             # https://github.com/facebookresearch/xcit/blob/master/xcit.py#L404-L405
-#             if isinstance(_out, tuple):
-#                 _out = _out[0]
-#             # accumulate outputs
-#             output = torch.cat((output, _out))
-#             start_idx = end_idx
-#         # Run the head forward on the concatenated features.
-#         return self.head(output)
+    def forward(self, x):
+        # convert to list
+        if not isinstance(x, list):
+            x = [x]
+        idx_crops = torch.cumsum(torch.unique_consecutive(
+            torch.tensor([inp.shape[-1] for inp in x]),
+            return_counts=True,
+        )[1], 0)
+        start_idx, output = 0, torch.empty(0).to(x[0].device)
+        for end_idx in idx_crops:
+            _out = self.backbone(torch.cat(x[start_idx: end_idx]))
+            # The output is a tuple with XCiT model. See:
+            # https://github.com/facebookresearch/xcit/blob/master/xcit.py#L404-L405
+            if isinstance(_out, tuple):
+                _out = _out[0]
+            # accumulate outputs
+            output = torch.cat((output, _out))
+            start_idx = end_idx
+        # Run the head forward on the concatenated features.
+        return self.head(output)
 
 
 def get_params_groups(model):
@@ -240,49 +216,66 @@ def has_batchnorms(model):
     return False
 
 
-class Loss(nn.Module):
-    def __init__(
-        self,
-        out_dim: int,
-        teacher_temp:float = 0.04,
-        student_temp:float = 0.1,
-        center_momentum:float = 0.9,
-    ):
+class DINOLoss(nn.Module):
+    def __init__(self, 
+                 out_dim, 
+                 ncrops: int = 10, 
+                 warmup_teacher_temp: float = 0.04, 
+                 teacher_temp:float = 0.04,
+                 warmup_teacher_temp_epochs:int = 0, 
+                 nepochs = EPOCHS, 
+                 student_temp=0.1,
+                 center_momentum=0.9):
         super().__init__()
         self.student_temp = student_temp
-        self.teacher_temp = teacher_temp
         self.center_momentum = center_momentum
-        self.register_buffer("center", torch.zeros(1, out_dim)) #Buffer that is not updated by optimizer, dimension of [1,output features]
-        
-        
-        def forward(self, student_output, teacher_output):
-            #Normalizations from 3.1 on the original paper (prior to softmax)
-            student_temp = [s/self.student_temp for s in student_output] #this naming is misleading, it's not the temperature, rather the temp applied to the output
-            teacher_temp = [(t - self.center) / self.teacher_temp for t in teacher_output]
+        self.ncrops = ncrops
+        self.register_buffer("center", torch.zeros(1, out_dim))
+        # we apply a warm up for the teacher temperature because
+        # a too high temperature makes the training instable at the beginning
+        self.teacher_temp_schedule = np.concatenate((
+            np.linspace(warmup_teacher_temp,
+                        teacher_temp, warmup_teacher_temp_epochs),
+            np.ones(nepochs - warmup_teacher_temp_epochs) * teacher_temp
+        ))
 
-            student_sm = [F.log_softmax(s, dim = -1) for s in student_temp]
-            teacher_sm = [F.log_softmax(t,dim=-1).detach() for t in teacher_temp]
+    def forward(self, student_output, teacher_output, epoch):
+        """
+        Cross-entropy between softmax outputs of the teacher and student networks.
+        """
+        student_out = student_output / self.student_temp
+        student_out = student_out.chunk(self.ncrops)
 
-            total_loss = 0
-            n_loss_terms = 0
-            
-            for t_ix, t in enumerate(teacher_sm):
-                for s_ix, s in enumerate(student_sm):
-                    if t_ix == s_ix: #Ensure that only differing views are compared
-                        continue
-                    loss = torch.sum(-t * s, dim = -1) #sum dot product of outputs across feature dimension
-                    total_loss += loss.mean()
-                    n_loss_terms += 1
-            
-            total_loss /= n_loss_terms
-            self.update_center(teacher_output)
-            return total_loss
+        # teacher centering and sharpening
+        temp = self.teacher_temp_schedule[epoch]
+        teacher_out = F.softmax((teacher_output - self.center) / temp, dim=-1)
+        teacher_out = teacher_out.detach().chunk(2)
 
-        #equation 4 from paper
-        @torch.no_grad()
-        def update_center(self, teacher_output): 
-            batch_center = torch.cat(teacher_output).mean(dim = 0, keepdim=True) #(1, out_dim)
-            self.center = self.center * self.center_momentum + (1 - self.center_momentum) * batch_center
+        total_loss = 0
+        n_loss_terms = 0
+        for iq, q in enumerate(teacher_out):
+            for v in range(len(student_out)):
+                if v == iq:
+                    # we skip cases where student and teacher operate on the same view
+                    continue
+                loss = torch.sum(-q * F.log_softmax(student_out[v], dim=-1), dim=-1)
+                total_loss += loss.mean()
+                n_loss_terms += 1
+        total_loss /= n_loss_terms
+        self.update_center(teacher_output)
+        return total_loss
+
+    @torch.no_grad()
+    def update_center(self, teacher_output):
+        """
+        Update center used for teacher output.
+        """
+        batch_center = torch.sum(teacher_output, dim=0, keepdim=True)
+        torch.distributed.all_reduce(batch_center)
+        batch_center = batch_center / (len(teacher_output) * torch.distributed.get_world_size())
+
+        # ema update
+        self.center = self.center * self.center_momentum + batch_center * (1 - self.center_momentum)
         
 #Prevent gradient from becoming too large, clip is maximum allowed norm of gradient
 def clip_gradents(model, clip = 2.0):
@@ -298,96 +291,6 @@ def clip_gradents(model, clip = 2.0):
                 p.grad.data.mul_(clip_coef)
 
 ###### Data Handling ######
-class DataHandler:
-    def __init__(self,
-                root_dir : str = './data',
-                dataset_name : str = 'NHF',
-                transform = None,
-                download : bool = True,
-                train : bool = True,
-                batch_size : int = 32, 
-                num_workers : int = 4, 
-                train_sample_size : int = None, 
-                test_sample_size  : int = None, 
-                image_size : int = 224,
-                num_channels : int = 3,
-                )-> None:
-        self.root_dir = root_dir
-        self.dataset_name = dataset_name
-        self.root = root_dir
-        self.train = train
-        self.download = download
-        self.batch_size = batch_size
-        self.num_workers = num_workers
-        self.train_sample_size = train_sample_size
-        self.test_sample_size = test_sample_size
-        self.image_size = image_size
-        self.train_transform = self.get_train_transform()
-        self.test_transform = self.get_test_transform()
-        self.num_channels = num_channels
-        
-        
-    
-
-    def prepare_data(self):
-        
-        
-        path_dataset_train = pathlib.Path("data/data_imagenette/train")
-        path_dataset_val = pathlib.Path("data/data_imagenette/val")
-        classes_path = pathlib.Path('data/data_imagnette/imagenette_labels.json')
-        
-        with classes_path.open('r') as f:
-            classes = json.load(f)
-        
-        
-        
-        
-        
-        
-        transform_aug = DataAugmentation(size=224, n_local_crops = 2)
-        transform_plain = transforms.Compose(
-            [
-                transforms.ToTensor(),
-                transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
-                transforms.Resize((224, 224)),
-            ]
-        )
-
-        dataset_train_aug = nn.ImageFolder(path_dataset_train, transform=transform_aug)
-        dataset_train_plain = nn.ImageFolder(path_dataset_train, transform=transform_plain)
-        dataset_val_plain = nn.ImageFolder(path_dataset_val, transform=transform_plain)
-        
-        aug_loader = DataLoader(
-        dataset_train_aug,
-        batch_size= 32,
-        shuffle=True,
-        drop_last=True,
-        num_workers= 4,
-        pin_memory=True,
-        )
-        train_loader = DataLoader(
-            dataset_train_plain,
-            batch_size= 32,
-            drop_last= False,
-            num_workers= 4,
-        )
-        val_loader = DataLoader(
-            dataset_val_plain,
-            batch_size = 32,
-            drop_last = False,
-            num_workers = 4,
-        )
-        
-        val_subset_loader = DataLoader( #TODO find out what this does
-            dataset_val_plain,
-            batch_size= 32,
-            drop_last = False,
-            sampler = nn.utils.SubsetRandomSampler(list(range(0, len(dataset_val_plain), 50))),
-            num_workers = 4,
-        )
-        
-        return train_loader, aug_loader, val_loader
-
 
 
         
@@ -508,7 +411,7 @@ class Head(nn.Module):
             
         self.apply(self._init_weights)
         
-        self.last_layer = nn.utils.weight_norm(nn.Linear(bottleneck_dim, out_dim, bias=False)).weight_g.data.fill_(1)
+        self.last_layer = nn.utils.parametrizations.weight_norm(nn.Linear(bottleneck_dim, out_dim, bias=False)).weight_g.data.fill_(1)
         
         if norm_last_layer:
             self.last_layer.weight_g.requires_grad = False

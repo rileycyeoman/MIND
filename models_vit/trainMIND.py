@@ -127,12 +127,12 @@ class Trainer:
             for j, (images, _) in tqdm.tqdm(enumerate(self.augloader), total=num_batches):
                 self.student.eval()
                 embs, imgs, labels_ = compute_embedding(
-                    self.student.backbone,
+                    self.student,
                     self.valsubset
                 )
 
                 curr_acc = compute_knn(
-                    self.student.backbone,
+                    self.student,
                     self.trainloader,
                     self.valloader,
                 )
@@ -144,7 +144,8 @@ class Trainer:
                 images = [img.to(device) for img in images]
                 student_logits = self.student(images)
                 teacher_logits = self.teacher(images[:2])
-                loss = self.loss_fn(student_logits, teacher_logits)
+                #student output, teacher output, epoch number
+                loss = self.loss_fn(student_logits, teacher_logits, i)
                 self.optimizer.zero_grad()
                 loss.backward()
                 utils.clip_gradients(self.student)
@@ -346,7 +347,7 @@ def main():
     for p in teacher.parameters():
         p.requires_grad = False
     
-    dino_loss = utils.Loss(
+    dino_loss = utils.DINOLoss(
         out_dim=OUT_DIM,
         teacher_temp = 0.04, #TODO turn to configs
         student_temp=0.1

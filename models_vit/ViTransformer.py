@@ -378,15 +378,15 @@ This portion is dedicated to adding any features from DINO
 
 
 class DINOHead(nn.Module):
-    def __init__(self, in_dim, out_dim, use_bn = False, norm_last_layer = True, nlayers = 3, hidden_dim = 2048, bottleneck_dim = 256) -> None:
+    def __init__(self, in_dim, out_dim, use_bn=False, norm_last_layer=True, nlayers=3, hidden_dim=2048, bottleneck_dim=256):
         super().__init__()
         nlayers = max(nlayers, 1)
-        if nlayers == 1: 
-            self.mlp = nn.Linear(in_features= in_dim, out_features =bottleneck_dim)
-        else: 
-            layers = [nn.Linear(in_features = in_dim, out_features = hidden_dim)]
-            if use_bn: #batch normalization
-                layers.append(nn.BatchNorm1d(num_features = hidden_dim))
+        if nlayers == 1:
+            self.mlp = nn.Linear(in_dim, bottleneck_dim)
+        else:
+            layers = [nn.Linear(in_dim, hidden_dim)]
+            if use_bn:
+                layers.append(nn.BatchNorm1d(hidden_dim))
             layers.append(nn.GELU())
             for _ in range(nlayers - 2):
                 layers.append(nn.Linear(hidden_dim, hidden_dim))
@@ -412,99 +412,3 @@ class DINOHead(nn.Module):
         x = nn.functional.normalize(x, dim=-1, p=2)
         x = self.last_layer(x)
         return x
-    
-class DINO(nn.Module):
-    def __init__(self, img_size=IMAGE_SIZE, patch_size=PATCH_SIZE, in_chans=NUM_CHANNELS, num_classes=NUM_CLASSES, embed_dim=HIDDEN_SIZE, depth=12,
-                 num_heads=NUM_ATTENTION_HEADS, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop_rate=0., attn_drop_rate=0.,
-                 drop_path_rate=0., norm_layer=nn.LayerNorm, dino_dim=256, **kwargs):
-        super().__init__()
-        self.img_size = IMAGE_SIZE
-        self.hidden_size = HIDDEN_SIZE
-        self.num_classes = NUM_CLASSES
-        # Create the embedding module
-        self.patch_embed = PatchEmbeddings()
-        num_patches = self.patch_embed.num_patches
-        self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
-        self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, embed_dim))
-        self.pos_drop = nn.Dropout(p=drop_rate)
-        self.norm = norm_layer(embed_dim)
-        # Create a linear layer to project the encoder's output to the number of classes
-        dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)] 
-        self.blocks = nn.ModuleList([
-            Block(
-                dim=embed_dim, num_heads=num_heads, qkv_bias=qkv_bias,
-                proj_drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer)
-            for i in range(depth)])
-        
-        self.dino_head = DINOHead(embed_dim, dino_dim)
-        
-        # Initialize the weights
-        self.apply(self._init_weights)
-
-    def _init_weights(self, m):
-        if isinstance(m, nn.Linear):
-            nn.init.trunc_normal_(m.weight, std=.02)
-            if isinstance(m, nn.Linear) and m.bias is not None:
-                nn.init.constant_(m.bias, 0)
-        elif isinstance(m, nn.LayerNorm):
-            nn.init.constant_(m.bias, 0)
-            nn.init.constant_(m.weight, 1.0)
-            
-    def interpolate_pos_encoding(self, x, w, h):
-        npatch = x.shape[1] - 1
-        N = self.pos_embed.shape[1] - 1
-        if npatch == N and w == h:
-            return self.pos_embed
-        class_pos_embed = self.pos_embed[:, 0]
-        patch_pos_embed = self.pos_embed[:, 1:]
-        dim = x.shape[-1]
-        w0 = w // self.patch_embed.patch_size
-        h0 = h // self.patch_embed.patch_size
-        w0, h0 = w0 + 0.1, h0 + 0.1
-        patch_pos_embed = nn.functional.interpolate(
-            patch_pos_embed.reshape(1, int(math.sqrt(N)), int(math.sqrt(N)), dim).permute(0, 3, 1, 2),
-            scale_factor=(w0 / math.sqrt(N), h0 / math.sqrt(N)),
-            mode='bicubic',
-        )
-        assert int(w0) == patch_pos_embed.shape[-2] and int(h0) == patch_pos_embed.shape[-1]
-        patch_pos_embed = patch_pos_embed.permute(0, 2, 3, 1).view(1, -1, dim)
-        return torch.cat((class_pos_embed.unsqueeze(0), patch_pos_embed), dim=1)
-    
-    def prepare_tokens(self, x):
-        B, nc, w, h = x.shape
-        x = self.patch_embed(x)  # patch linear embedding
-
-        # add the [CLS] token to the embed patch tokens
-        cls_tokens = self.cls_token.expand(B, -1, -1)
-        x = torch.cat((cls_tokens, x), dim=1)
-
-        # add positional encoding to each token
-        x = x + self.interpolate_pos_encoding(x, w, h)
-
-        return self.pos_drop(x)
-        
-    def forward(self, x):
-        x = self.prepare_tokens(x)
-        for blk in self.blocks:
-            x = blk(x)
-        x = self.norm(x)
-        return x[:, 0], self.dino_head(x[:, 0])
-
-    def get_last_selfattention(self, x):
-        x = self.prepare_tokens(x)
-        for i, blk in enumerate(self.blocks):
-            if i < len(self.blocks) - 1:
-                x = blk(x)
-            else:
-                # return attention of the last block
-                return blk(x, return_attention=True)
-
-    def get_intermediate_layers(self, x, n=1):
-        x = self.prepare_tokens(x)
-        # we return the output tokens from the `n` last blocks
-        output = []
-        for i, blk in enumerate(self.blocks):
-            x = blk(x)
-            if len(self.blocks) - i <= n:
-                output.append(self.norm(x))
-        return output
