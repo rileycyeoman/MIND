@@ -123,7 +123,7 @@ class Trainer:
         best_acc = 0
         num_batches = len(self.dataset_train_aug) // BATCH_SIZE
         # Train the model
-        for i in range(EPOCHS):
+        for epoch in range(EPOCHS):
             for j, (images, _) in tqdm.tqdm(enumerate(self.augloader), total=num_batches):
                 self.student.eval()
                 embs, imgs, labels_ = compute_embedding(
@@ -143,9 +143,9 @@ class Trainer:
             
                 images = [img.to(device) for img in images]
                 student_logits = self.student(images)
-                teacher_logits = self.teacher(images[:2])
+                teacher_logits = self.teacher(images[:2]) #Only use two global views
                 #student output, teacher output, epoch number
-                loss = self.loss_fn(student_logits, teacher_logits, i)
+                loss = self.loss_fn(student_logits, teacher_logits, epoch)
                 self.optimizer.zero_grad()
                 loss.backward()
                 utils.clip_gradients(self.student)
@@ -167,10 +167,10 @@ class Trainer:
             # test_losses.append(test_loss)
             # accuracies.append(train_accuracy)
             t1 = time.time()
-            print(f"{TextColors.LIGHT_BLUE}Epoch:{TextColors.ENDC} {i+1}") 
-            print(f"{TextColors.BLUE}Train loss:{TextColors.ENDC} {train_loss:.4f}")
-            print(f"{TextColors.CYAN}Test loss:{TextColors.ENDC} {test_loss:.4f}") 
-            print(f"{TextColors.GREEN}Accuracy:{TextColors.ENDC} {test_accuracy:.4f}\n")
+            # print(f"{TextColors.LIGHT_BLUE}Epoch:{TextColors.ENDC} {i+1}") 
+            # print(f"{TextColors.BLUE}Train loss:{TextColors.ENDC} {train_loss:.4f}")
+            # print(f"{TextColors.CYAN}Test loss:{TextColors.ENDC} {test_loss:.4f}") 
+            # print(f"{TextColors.GREEN}Accuracy:{TextColors.ENDC} {test_accuracy:.4f}\n")
             print(f"Time Elapsed from Last Epoch: {t1 - t0}")
             t0 = t1
             #TODO ADD VISUALIZATION STEP HERE
@@ -276,7 +276,9 @@ def main():
     
     
     
-    transform_aug = utils.DataAugmentation(size=224, n_local_crops = 2)
+    transform_aug = utils.DataAugmentationDINO(global_crops_scale = (0.4, 1),
+                                           local_crops_scale = (0.05, 0.4), 
+                                           local_crops_number = 8)
     transform_plain = transforms.Compose(
         [
             transforms.ToTensor(),
