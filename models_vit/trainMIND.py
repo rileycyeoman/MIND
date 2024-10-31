@@ -90,6 +90,7 @@ class Trainer:
     optimizer: any
     loss_fn: any
     teacher_momentum: float
+    lstm: any
         
     def pretrain(self, pretrainloader, epochs, save_model_every_n_epochs=0):
         """
@@ -102,15 +103,43 @@ class Trainer:
 
     
 
-    def finetune(self, finetuneloader, epochs, save_model_every_n_epochs=0):
+    def finetune(self, finetuneloader, epochs):
         """
         Fine-tune the model for the specified number of epochs.
         """
         for epoch in range(epochs):
             finetune_loss, finetune_accuracy = self.train_epoch(finetuneloader)
-            print(f"Fine-tune Epoch: {epoch+1}, Loss: {finetune_loss:.4f}, Accuracy: {finetune_accuracy:.4f}")
-
     
+    @torch.no_grad()
+    def test(self):
+        self.student.eval()
+        self.lstm.eval()
+        total_loss = 0
+        correct = 0
+        all_preds, all_labels = 0
+        for batch in self.valloader:
+            images, labels = [t.to(self.device) for t in batch]
+            
+            features = self.student(images)
+            features = features.unsqueeze(0)
+            lstm_output , _ = self.lstm(features)
+            
+            lstm_logits = self.classifier(lstm_output[:, -1, :])
+            
+            loss = self.loss_fn(lstm_logits, labels)
+            total_loss += loss.item() * len(images)
+        
+       
+        predictions = torch.argmax(lstm_logits, dim=1)
+        correct += torch.sum(predictions == labels).item()
+
+        all_preds.extend(predictions.cpu().numpy())
+        all_labels.extend(labels.cpu().numpy())
+
+        accuracy = correct / len(self.valloader.dataset)
+        avg_loss = total_loss / len(self.valloader.dataset)
+        
+        return accuracy, avg_loss, all_preds, all_labels
         
     def train(self):
         """
@@ -360,7 +389,12 @@ def main():
     optimizer = optim.AdamW(list(student_model.parameters()) + list(classifier.parameters()), lr=LR, weight_decay=1e-2)
     # optimizer = optim.SGD(model.parameters(), lr = LR, weight_decay = 1e-2, momentum = 0.9)
     # loss_fn = nn.CrossEntropyLoss()
-    
+    lstm = nn.LSTM(
+        input_size  = NUM_CHANNELS,
+        hidden_size = HIDDEN_SIZE,
+        num_layers  = 2,
+        batch_first=True
+    )
     trainer = Trainer(
     trainloader=train_loader,
     valloader=val_loader,
@@ -375,11 +409,11 @@ def main():
     teacher_momentum=teacher_momentum
     )
     print("==============MIND DINO Phase==============")
-    # trainer.pretrain(pretrainloader, PRETRAIN_EPOCHS, save_model_every_n_epochs=save_model_every_n_epochs)
-    print("==============Training MIND==============")
     trainer.train()
+    print("==============Training MIND==============")
+    # trainer.finetune()
     print("==============Validating MIND==============")
-    # trainer.finetune(finetuneloader, FINETUNE_EPOCHS, save_model_every_n_epochs=save_model_every_n_epochs)
+    trainer.test()
     print("==============Training done==============")
 
 if __name__ == '__main__':
